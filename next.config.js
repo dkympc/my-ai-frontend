@@ -1,7 +1,10 @@
 /** @type {import('next').NextConfig} */
-
-// 这里用 FASTAPI_BASE_URL，方便以后在 Sealos 上通过环境变量注入内网地址
-const FASTAPI_BASE_URL = process.env.FASTAPI_BASE_URL || 'http://127.0.0.1:8000';
+// ✨ 核心修复：利用 NODE_ENV 区分环境。
+// 本地 npm run dev 时是 development，走 127.0.0.1
+// GitHub Actions 打包时是 production，强制锁死 K8s 内网地址
+const FASTAPI_BASE_URL = process.env.NODE_ENV === 'development' 
+  ? 'http://127.0.0.1:8000' 
+  : 'http://yr-ai-backend:8000';
 
 const nextConfig = {
   output: 'standalone',   // 极致压缩 Docker 镜像体积
