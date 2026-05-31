@@ -562,14 +562,21 @@ export default function ChatPage() {
     }
   };
 
-  useEffect(() => {
-    let intervalId: NodeJS.Timeout;
-    if (activeSettingsTab === 'admin' && userRole === 'admin') {
-      fetchAdminData(false); 
-      intervalId = setInterval(() => { fetchAdminData(true); }, 3000);
-    }
-    return () => { if (intervalId) clearInterval(intervalId); };
-  }, [activeSettingsTab, userRole]);
+// ✨ 彻底修复：引入 isSettingsModalOpen 状态判断
+useEffect(() => {
+  let intervalId: NodeJS.Timeout;
+  
+  // 1. 新增：只有当设置弹窗是【打开状态】，且处于 admin 标签时才轮询
+  if (isSettingsModalOpen && activeSettingsTab === 'admin' && userRole === 'admin') {
+    fetchAdminData(false); 
+    intervalId = setInterval(() => { fetchAdminData(true); }, 3000);
+  }
+  
+  return () => { if (intervalId) clearInterval(intervalId); };
+
+// 2. 新增：必须把 isSettingsModalOpen 加入依赖数组！
+// 这样你一关弹窗，React 就会感知到状态变了，立刻执行 return 里的清理函数杀掉定时器。
+}, [activeSettingsTab, userRole, isSettingsModalOpen]);
 
   const handleViewUserChats = async (username: string) => {
     try {
