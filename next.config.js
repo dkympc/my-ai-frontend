@@ -1,10 +1,9 @@
 /** @type {import('next').NextConfig} */
 // ✨ 核心修复：利用 NODE_ENV 区分环境。
-// 本地 npm run dev 时是 development，走 127.0.0.1
-// GitHub Actions 打包时是 production，强制锁死 K8s 内网地址
 const FASTAPI_BASE_URL = process.env.NODE_ENV === 'development' 
   ? 'http://127.0.0.1:8000' 
-  : 'http://yr-ai-backend:8000';
+  // 下面这行换成 Sealos 刚刚给你分配的真实内网全名！
+  : 'http://yr-ai-backend-rvgiqrjpaaik.ns-9q0y7e4d:8000';
 
 const nextConfig = {
   output: 'standalone',   // 极致压缩 Docker 镜像体积
