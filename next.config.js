@@ -35,6 +35,7 @@ const nextConfig = {
           { key: 'X-Frame-Options', value: 'DENY' },
           { key: 'Referrer-Policy', value: 'no-referrer' },
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+          { key: 'X-Accel-Buffering', value: 'no' } // ✨ 核心魔法：强制命令最外层 Nginx 也放弃缓冲！
         ],
       },
     ];
