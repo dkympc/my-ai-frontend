@@ -25,9 +25,7 @@ const nextConfig = {
       },
     ];
   },
-  // ... 下面保留你原来的 headers 代码 ...
-};
-
+  
   async headers() {
     return [
       {
