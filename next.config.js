@@ -6,16 +6,15 @@ const FASTAPI_BASE_URL = process.env.NODE_ENV === 'development'
   : 'http://yr-ai-backend-rvgiqrjpaaik.ns-9q0y7e4d:8000';
 
 const nextConfig = {
-  output: 'standalone',   // 极致压缩 Docker 镜像体积
+  output: 'standalone',
   poweredByHeader: false, 
   reactStrictMode: true,
-
-  // ✨ 核心绝杀：强制忽略打包时的 ESLint 和 TypeScript 报错警告
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
-  typescript: {
-    ignoreBuildErrors: true,
+  eslint: { ignoreDuringBuilds: true },
+  typescript: { ignoreBuildErrors: true },
+  
+  // 👇 加入这块实验性配置，解除代理超时限制！
+  experimental: {
+    proxyTimeout: 300000, // 设置 rewrites 代理超时时间为 300 秒（5分钟）
   },
 
   async rewrites() {
@@ -26,6 +25,8 @@ const nextConfig = {
       },
     ];
   },
+  // ... 下面保留你原来的 headers 代码 ...
+};
 
   async headers() {
     return [
