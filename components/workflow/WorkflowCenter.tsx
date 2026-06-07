@@ -57,8 +57,10 @@ export default function WorkflowCenter({
     <>
       {activeView === 'workflow-gallery' && (
         <div className="flex flex-col h-full overflow-hidden bg-transparent">
-          {/* 画廊头部 */}
-          <header className="px-10 pt-12 pb-6 shrink-0 relative z-10 select-none">
+          {/* 画廊头部 
+              🚀 修复重点：将 pb-6 改为了 pb-2，把多出来的空间让给下方的滚动容器 
+          */}
+          <header className="px-10 pt-12 pb-2 shrink-0 relative z-10 select-none">
             <div className="flex flex-col gap-2">
               <h1 className="text-[28px] font-bold tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-white via-zinc-200 to-zinc-500 drop-shadow-[0_0_15px_rgba(255,255,255,0.2)]">
                 {activeWfCategory === 'all' ? '热门智能应用' : 
@@ -72,8 +74,10 @@ export default function WorkflowCenter({
             </div>
           </header>
 
-          {/* 画廊卡片 */}
-          <div className="flex-1 overflow-y-auto custom-scrollbar px-10 pb-10">
+          {/* 画廊卡片 
+              🚀 修复重点：新增了 pt-6 (Padding Top)，让卡片在滚动容器内部拥有了上方呼吸空间，彻底杜绝悬浮截断！
+          */}
+          <div className="flex-1 overflow-y-auto custom-scrollbar px-10 pt-6 pb-12">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {WORKFLOW_REGISTRY
                 .filter(wf => activeWfCategory === 'all' || wf.category === activeWfCategory)

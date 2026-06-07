@@ -150,6 +150,35 @@ export default function ChatPage() {
       return () => clearTimeout(timer);
     }
   }, [toastMsg]);
+
+
+    // ==========================================
+  // ✨ 核心生命体征：全局心跳保活引擎
+  // ==========================================
+  useEffect(() => {
+    let heartbeatTimer: NodeJS.Timeout;
+
+    const sendHeartbeat = () => {
+      const token = localStorage.getItem('yr-ai-token');
+      if (!token) return;
+      
+      // 🚀 使用原生 fetch 并且抓取所有错误，静默执行
+      // 这样即便用户网络波动、断网一两秒，也不会在界面上弹出烦人的报错红框
+      fetch(`${API_BASE}/v1/user/heartbeat`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      }).catch(() => {});
+    };
+
+    if (isAuthenticated && hasLoadedFromServer) {
+      sendHeartbeat(); // 刚进系统立刻跳一下
+      heartbeatTimer = setInterval(sendHeartbeat, 30000); // 之后每 30 秒跳一下
+    }
+
+    return () => {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+    };
+  }, [isAuthenticated, hasLoadedFromServer]);
   // ==========================================
   const handleContainerScroll = () => {
     if (scrollRef.current) {
@@ -224,7 +253,13 @@ export default function ChatPage() {
             if (v.status === 'processing' && v.task_id && v.pollModel) pollVideoTask(v.id, v.task_id, v.pollModel);
           });
         }
+        
         if (data.wfSessions) setWfSessions(data.wfSessions);
+
+        // ✨ 画布项目数据拉取
+        if (data.canvasProjects && Array.isArray(data.canvasProjects)) {
+          useAppStore.setState({ canvasProjects: data.canvasProjects });
+        }
         
         let currentUsername = 'User';
         try { currentUsername = JSON.parse(atob(token.split('.')[1])).sub; } catch(e) {}
@@ -282,15 +317,23 @@ export default function ChatPage() {
   const latestPayloadRef = useRef("");
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   
+
   useEffect(() => { 
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-    // 只要大模型在疯狂吐字，就不断重新计时，绝对不执行致命的 JSON.stringify！
+    
     debounceTimerRef.current = setTimeout(() => {
-      latestPayloadRef.current = JSON.stringify({ sessions, imageHistory, videoHistory, wfSessions, settings }); 
-    }, 1000); // 等大模型停顿 1 秒后，才去悄悄序列化。
+      latestPayloadRef.current = JSON.stringify({ 
+        sessions, 
+        imageHistory, 
+        videoHistory, 
+        wfSessions, 
+        settings,
+        canvasProjects: useAppStore.getState().canvasProjects 
+      }); 
+    }, 1000); 
     
     return () => { if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current); }
-  }, [sessions, imageHistory, videoHistory, wfSessions, settings]);
+  }, [sessions, imageHistory, videoHistory, wfSessions, settings, useAppStore.getState().canvasProjects]);
   useEffect(() => {
     if (isInitialized && isAuthenticated && hasLoadedFromServer) {
       const syncTimer = setTimeout(() => { forceSyncToServer(); }, 2000); 

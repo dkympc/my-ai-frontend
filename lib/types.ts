@@ -62,9 +62,13 @@ export interface ChatMessage {
     messages: {role: 'user'|'assistant', content: string}[]; 
     updatedAt: number; 
   }
-  export interface CanvasProject {
+// /lib/types.ts (找到最底部的 CanvasProject 并替换)
+export interface CanvasProject {
   id: string;
   title: string;
   updatedAt: number;
   previewUrl?: string; // 画布缩略图（可选）
+  nodes?: any[];
+  edges?: any[];
+  localAssets?: any[]; // ✨ 新增：当前画布专属的拖拽资产库
 }
