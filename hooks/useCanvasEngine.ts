@@ -3,7 +3,7 @@ import { fetchApi } from '@/services/api';
 import { useAppStore } from '@/store/useAppStore';
 
 // ✨ 全局交通管制中心（内存单例）
-const taskQueue: Array<{ nodeId: string, type: 'image' | 'video', getNodes: any, updateNodeData: any }> = [];
+const taskQueue: Array<{ nodeId: string, type: 'image' | 'video', getNodes: any, updateNodeData: any, extraImageRefs?: string[] }> = [];
 const activeTasks = new Set<string>();
 const MAX_CONCURRENCY = 2; // 最大并发数：2，防止 API 封号
 
@@ -21,7 +21,7 @@ export function useCanvasEngine() {
     
     try {
       if (task.type === 'image') {
-        await executeImageTask(task.nodeId, task.getNodes, task.updateNodeData);
+        await executeImageTask(task.nodeId, task.getNodes, task.updateNodeData, task.extraImageRefs);
       } else if (task.type === 'video') {
         await executeVideoTask(task.nodeId, task.getNodes, task.updateNodeData);
       }
@@ -33,10 +33,10 @@ export function useCanvasEngine() {
   };
 
   // 🚀 对外暴露的入队方法
-  const enqueueTask = (nodeId: string, type: 'image' | 'video', getNodes: any, updateNodeData: any) => {
+  const enqueueTask = (nodeId: string, type: 'image' | 'video', getNodes: any, updateNodeData: any, extraImageRefs?: string[]) => {
     // 标记节点进入“排队”状态
     updateNodeData(nodeId, { status: 'pending', isGenerating: true });
-    taskQueue.push({ nodeId, type, getNodes, updateNodeData });
+    taskQueue.push({ nodeId, type, getNodes, updateNodeData, extraImageRefs });
     useAppStore.getState().setToastMsg(`🚦 节点已加入${type === 'image' ? '生图' : '渲染'}队列 (排队中: ${taskQueue.length})`);
     
     // 呼叫交通灯检查是否可以放行
@@ -47,7 +47,7 @@ export function useCanvasEngine() {
   // ==========================================
   // 🛡️ 核心中间件：Payload 组装与参数翻译 (Middleware Adapter)
   // ==========================================
-  const buildImagePayload = (data: any, settings: any) => {
+  const buildImagePayload = (data: any, settings: any, externalRefs?: string[]) => {
     // 1. 风格拦截与覆写逻辑
     const styleOverride = data.styleOverride || '继承全局预设';
     const globalSuffix = settings?.globalPromptSuffix ? `, ${settings.globalPromptSuffix}` : '';
@@ -92,12 +92,22 @@ export function useCanvasEngine() {
       }
     }
 
+    // ==========================================
+    // 🆕 收集从上游节点传过来的参考图
+    // ==========================================
+    const refImages = (externalRefs && externalRefs.length > 0)
+      ? externalRefs
+      : (data.incomingAssets
+          ?.filter((a: any) => a._type === 'image')
+          .map((a: any) => a.url) || []);
+
     return { 
       model: targetModel, 
       prompt: finalPrompt, 
       ratio: data.ratio || '16:9', 
       size: targetSize,
-      n: data.n || 1 
+      n: data.n || 1,
+      ...(refImages.length > 0 ? { image: refImages[0], images: refImages } : {})
     };
   };
 
@@ -131,25 +141,34 @@ export function useCanvasEngine() {
   };
 
   // ==========================================
-  // 执行器：生图逻辑 (防烧钱 Mock 模式)
-  // ==========================================
-  const executeImageTask = async (nodeId: string, getNodes: any, updateNodeData: any) => {
+  const executeImageTask = async (nodeId: string, getNodes: any, updateNodeData: any, extraImageRefs?: string[]) => {
     const node = getNodes().find((n: any) => n.id === nodeId);
     if (!node) return;
     
     updateNodeData(nodeId, { status: 'generating' }); 
-    const payload = buildImagePayload(node.data, useAppStore.getState().canvasSettings);
+    const payload = buildImagePayload(node.data, useAppStore.getState().canvasSettings, extraImageRefs);
     
-    // 打印真实 payload 到控制台供你检查，但不发真实请求
     console.log("【中间件输出】生图 API Payload:", payload);
     
-    return new Promise<void>((resolve) => {
-      setTimeout(() => {
-        const mockImageUrl = 'https://images.unsplash.com/photo-1618331835717-801e976710b2?q=80&w=1024&auto=format&fit=crop';
-        updateNodeData(nodeId, { status: 'done', isGenerating: false, frameUrl: mockImageUrl, resultUrl: mockImageUrl });
-        resolve();
-      }, 3000);
-    });
+    try {
+      const response = await fetchApi('/v1/images/generations', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      
+      const resData = await response.json();
+      const url = resData.data?.[0]?.url;
+      
+      if (url) {
+        updateNodeData(nodeId, { status: 'done', isGenerating: false, frameUrl: url, resultUrl: url });
+      } else {
+        throw new Error("API 未返回图片 URL");
+      }
+    } catch (error) {
+      console.error("生图失败:", error);
+      updateNodeData(nodeId, { status: 'failed', isGenerating: false });
+      useAppStore.getState().setToastMsg("生图失败，请查看控制台错误");
+    }
   };
 
   // ==========================================

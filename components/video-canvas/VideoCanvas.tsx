@@ -34,8 +34,8 @@ interface WorkspaceProps {
     videoHistory: VideoRecord[];
 }
   
-import { MediaNode, TextNode, RenderNode, CombineNode, MasterScriptNode, ShotNode, VideoClipNode, ScriptTableNode } from './CustomNodes';
-const nodeTypes = { media: MediaNode, text: TextNode, render: RenderNode, combine: CombineNode, masterScript: MasterScriptNode, shot: ShotNode, videoClip: VideoClipNode, scriptTable: ScriptTableNode };
+import { MediaNode, TextNode, RenderNode, CombineNode, MasterScriptNode, ShotNode, VideoClipNode, ScriptTableNode, AssetTableNode } from './CustomNodes';
+const nodeTypes = { media: MediaNode, text: TextNode, render: RenderNode, combine: CombineNode, masterScript: MasterScriptNode, shot: ShotNode, videoClip: VideoClipNode, scriptTable: ScriptTableNode, assetTable: AssetTableNode };
 
 // ✨ 自定义可悬停删除的连线组件
 function DeletableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, markerEnd }: any) {
@@ -92,6 +92,18 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState(currentProject?.nodes || []);
   const [edges, setEdges, onEdgesChange] = useEdgesState(currentProject?.edges || []);
   
+  // ✨ 核心修复 1：防止 React Flow 初始挂载时死锁，强制注入后端真实数据
+  const hasLoadedDataRef = useRef(false);
+  useEffect(() => {
+    if (currentProject && !hasLoadedDataRef.current) {
+      if (currentProject.nodes && currentProject.nodes.length > 0) {
+        setNodes(currentProject.nodes);
+        setEdges(currentProject.edges || []);
+      }
+      hasLoadedDataRef.current = true;
+    }
+  }, [currentProject, setNodes, setEdges]);
+
   const { screenToFlowPosition } = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement>(null);
   
@@ -139,18 +151,24 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
     return () => window.removeEventListener('wheel', preventBrowserZoom, { capture: true });
   }, []);
 
-  // ✨ 实时监测变动并触发自动保存 (加入防抖，解决回退和丢失问题)
+  // ✨ 实时监测变动并触发自动保存 (加入防抖与初次挂载拦截)
+  const isFirstRender = useRef(true);
   useEffect(() => {
+    // 核心修复 2：防止组件刚挂载时，把空数组 [] 错误地覆写回云端
+    if (isFirstRender.current) {
+       isFirstRender.current = false;
+       return;
+    }
+
     if (activeCanvasProjectId && typeof updateCanvasProject === 'function') {
       setSaveStatus('saving');
       
-      // 核心修复：拖动节点时会疯狂触发更新，必须等用户停下鼠标 1.5 秒后，再真正写入 Zustand 存储
       const timer = setTimeout(() => {
         updateCanvasProject(activeCanvasProjectId, { nodes, edges });
         setSaveStatus('saved');
       }, 1500); 
       
-      return () => clearTimeout(timer); // 如果 1.5 秒内又动了，清空重置计时
+      return () => clearTimeout(timer); 
     }
   }, [nodes, edges, activeCanvasProjectId]);
 

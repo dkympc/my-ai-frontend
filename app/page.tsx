@@ -38,6 +38,7 @@ export default function ChatPage() {
   // 1. 从 Zustand 状态库提取全局状态
   const { isAuthenticated, userRole, isAuthChecking, setIsAuthenticated, setUserRole, setIsAuthChecking } = useAuthStore();
   const { activeView, activeCanvasProjectId, isSettingsModalOpen, settings, toastMsg, outOfBalanceMsg, setActiveView, setIsSettingsModalOpen, setSettings, setToastMsg, setOutOfBalanceMsg } = useAppStore();
+  const canvasProjects = useAppStore(state => state.canvasProjects);
 
   // 2. 恢复尚未迁移的局部组件状态
   const [loginUsername, setLoginUsername] = useState("");
@@ -328,18 +329,18 @@ export default function ChatPage() {
         videoHistory, 
         wfSessions, 
         settings,
-        canvasProjects: useAppStore.getState().canvasProjects 
+        canvasProjects: canvasProjects
       }); 
     }, 1000); 
     
     return () => { if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current); }
-  }, [sessions, imageHistory, videoHistory, wfSessions, settings, useAppStore.getState().canvasProjects]);
+  }, [sessions, imageHistory, videoHistory, wfSessions, settings, canvasProjects]);
   useEffect(() => {
     if (isInitialized && isAuthenticated && hasLoadedFromServer) {
       const syncTimer = setTimeout(() => { forceSyncToServer(); }, 2000); 
       return () => clearTimeout(syncTimer);
     }
-  }, [sessions, imageHistory, videoHistory, wfSessions, settings, isInitialized, isAuthenticated, hasLoadedFromServer]);
+  }, [sessions, imageHistory, videoHistory, wfSessions, settings, canvasProjects, isInitialized, isAuthenticated, hasLoadedFromServer]);
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (isAuthenticated && hasLoadedFromServer) {
@@ -639,9 +640,9 @@ export default function ChatPage() {
 
           {activeView === 'image-gen' && <ImageGenerator imageHistory={imageHistory} setImageHistory={setImageHistory} activeImageId={activeImageId} setActiveImageId={setActiveImageId} />}
           {activeView === 'video-gen' && <VideoGenerator videoHistory={videoHistory} setVideoHistory={setVideoHistory} />}
-          {/* 👇 全新的画布路由控制 👇 */}
-          {activeView === 'video-canvas' && !activeCanvasProjectId && <CanvasVault />}
-          {activeView === 'video-canvas' && activeCanvasProjectId && <VideoCanvas imageHistory={imageHistory} videoHistory={videoHistory} />}
+          {/* 👇 全新的画布路由控制（增加 hasLoadedFromServer 拦截，防覆盖死锁） 👇 */}
+          {activeView === 'video-canvas' && !activeCanvasProjectId && hasLoadedFromServer && <CanvasVault />}
+          {activeView === 'video-canvas' && activeCanvasProjectId && hasLoadedFromServer && <VideoCanvas imageHistory={imageHistory} videoHistory={videoHistory} />}
         </main>
       </div>
 

@@ -75,8 +75,13 @@ export const useAppStore = create<AppState>()(
     {
       name: 'yr-canvas-storage',
       // ✨ 核心修复：把页面路由状态和画布ID一起加入缓存白名单！
-      partialize: (state) => ({ 
-        canvasProjects: state.canvasProjects,
+      partialize: (state) => ({
+        // 只保留项目的基本信息（避免撑爆 localStorage）
+        canvasProjects: (state.canvasProjects || []).map((p: any) => ({
+          id: p.id,
+          title: p.title,
+          updatedAt: p.updatedAt
+        })),
         activeView: state.activeView,
         activeCanvasProjectId: state.activeCanvasProjectId
       }),
