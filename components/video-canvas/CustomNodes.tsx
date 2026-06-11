@@ -229,7 +229,7 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
     useAppStore.getState().setToastMsg("正在通读全剧本，锁定电影级全局机位...");
     
     try {
-      const targetModel = (data.model === 'gpt-5.4' || data.model === 'deepseek-v4-pro') ? data.model : 'deepseek-v4-pro';
+      const targetModel = data.model || 'deepseek-v4-pro';
       
       // ✨ 痛点 1 修复：获取当前画布全局画风设置
       const globalStyle = useAppStore.getState().canvasSettings?.globalPromptSuffix || "无特定风格";
@@ -239,27 +239,27 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
         messages: [
           {
             role: "system",
-            content: `你是一个顶尖的电影摄影指导。请阅读完整剧本，推荐1套最契合的【英文电影级摄影机与镜头组合】以及【全局风格调性】。
+            content: `你是一个顶尖的影视视觉总监（兼任摄影指导与美术指导）。请阅读完整剧本，推荐1套最契合的【英文全局视觉基建（涵盖介质/画风/光影基调）】。
 
-【全局画风硬约束】：当前项目已设定为【${globalStyle}】。你的所有推荐必须绝对符合此风格大类（若为二次元请推荐动画引擎/笔触；若为写实请推荐真实物理机位）。
+【全局画风硬约束】：当前项目已设定为【${globalStyle}】。你的所有推荐必须绝对契合此风格大类！
 
-【AI 内部推理要求（必须严格遵守以下逻辑生成参数，但不要将推理过程输出）】：
-1. 类型诊断：在心中提炼该剧本的核心影片类型与视觉意图。
-2. 定制提案：判断影片是“实拍”还是“动画/CG”，并极度精简地给出以下四项参数（严禁长句/从句，单项不超过3个短语）：
-   - 全局视觉介质 (Medium & Engine)：极简定义底层物理/渲染质感（如 35mm Kodak film, ARRI Alexa 65; 动画如 Unreal Engine 5, Cel shading）。
-   - 镜头组与光学特性 (Lens Family)：极简定义镜头系列与光学特征（如 Anamorphic lenses, Vintage Cooke, minimal flaring）。【防污染红线：严禁写死具体焦距（如 50mm）或光圈大小，景别必须下放。若为纯2D动画替换为线条与笔触特征】。
-   - 全局色彩底片与LUT逻辑 (Color Science & Show LUT)：极简定义全片后期的色彩映射逻辑（如 Bleach Bypass, Kodak 2383 LUT）。【防污染红线：必须描述为“后期滤镜”，自带色彩宽容度，绝对严禁写成“画面里没有鲜艳颜色”等绝对化排斥词汇】。
-   - 全局光影反差与质感 (Macro Lighting Ratio & Contrast)：极简定义相机的宽容度与微型对比度（如 Hard-contrast）。【防污染红线：只决定光影的“软硬基调”，不决定“明暗程度”！严禁写死具体的“时间/天气/光线方向”，具体照明动机必须 100% 留白】。
+【最严格的双轨物理隔离法则（绝对红线）】：
+1. 如果上方画风属于【二次元/动画/动漫】类：绝对禁止出现任何实拍物理摄影机（如 ARRI, RED）、胶片型号（如 35mm, Kodak Vision3）、实体镜头（如 Anamorphic, C-Series, 50mm）的词汇！二次元哪来的胶片和镜头？！你必须使用纯动画术语，如：Studio Ghibli animation, Cel shading, flat colors, Anime aesthetic, Kyoto Animation style。
+2. 如果上方画风属于【3D渲染】类：禁止使用实拍物理设备，必须使用：Unreal Engine 5 render, Octane render, Ray tracing, 3D CGI。
+3. 只有当上方画风属于【写实/电影/无特定风格】类时：才允许并必须使用顶级电影工业设备，如：Shot on ARRI Alexa 65, 35mm film, vintage anamorphic lenses。
 
-【红色禁区（必须遵守的绝对红线）】：
-1. 严禁输出任何带有“镜号：”、“首帧为：”、“画面主体”等具体分镜格式的内容！
-2. 严格遵守“全局定画板，局部定颜料”：当前步骤只构建底片质感与宏观氛围，所有涉及具体场景的时间、光源、颜色、质感、构图，必须全面留白！
-3. 严禁在输出文本中提及“第三步”、“分镜”等流程词汇。
+【参数生成逻辑（不要将推理过程输出）】：
+1. 视觉介质 (Medium & Engine)：极简定义底层渲染质感（必须遵照上述双轨法则）。
+2. 光学/笔触特性：实拍定义镜头畸变/质感（不写死焦距）；动画定义线条/手绘质感。
+3. 全局色彩底片 (Color Science & LUT)：极简定义全片色彩逻辑（如 Bleach Bypass，或 Anime pastel color palette）。
+4. 全局光影反差 (Macro Contrast)：定义软硬基调（如 Hard-contrast）。【时间与光源方向必须 100% 留白交由分镜决定！】
 
 【最终输出铁律】：
-你必须将上述四项参数用逗号自动拼接成一句话。
-绝对禁止输出“类型诊断”、“视觉动机解释”或任何向用户提问的中文对话！不要有任何前言后语。
-示例：Shot on ARRI Alexa 65, Vintage Cooke Anamorphic lenses, Bleach Bypass LUT, Hard-contrast cinematic lighting`
+你必须将上述四项参数用逗号自动拼接成【纯英文的一句话】。
+绝对禁止输出任何中文、前言后语、序号或解释！
+错误示范（二次元里掺杂实拍）：Shot on 35mm Kodak, Anime style...
+正确示范（纯二次元）：Studio Ghibli animation, soft watercolor pastel palette, Cel shading, cinematic low-contrast light
+正确示范（纯实拍）：Shot on ARRI Alexa 65, Vintage Cooke Anamorphic lenses, Bleach Bypass LUT, Hard-contrast cinematic lighting`
           },
           { role: "user", content: `剧本内容：\n${data.text.substring(0, 8000)}` }
         ]
@@ -288,7 +288,7 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
     useAppStore.getState().setToastMsg(`正在通读剧本，提炼${type === 'scene' ? '场景' : type === 'character' ? '角色' : '道具'}数据表...`);
     
     try {
-      const targetModel = (data.model === 'gpt-5.4' || data.model === 'deepseek-v4-pro') ? data.model : 'deepseek-v4-pro';
+      const targetModel = data.model || 'deepseek-v4-pro';
       let systemPrompt = "";
       
       if (type === 'scene') {
@@ -367,7 +367,7 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
     updateNodeData(id, { isGenerating: true });
     
     try {
-      const targetModel = (data.model === 'gpt-5.4' || data.model === 'deepseek-v4-pro') ? data.model : 'deepseek-v4-pro';
+      const targetModel = data.model || 'deepseek-v4-pro';
             // ✨ [新增] 抓取画布上的资产基建表，构建 LLM 随身字典
             const assetTables = getNodes().filter(n => n.type === 'assetTable');
             let dictText = "【以下是全局基建资产字典，通读剧本时请务必自行比对人物和场景，提取对应的特征和光影(光影必须用纯英文输出)】\n";
@@ -859,7 +859,7 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
       <div className={`absolute bottom-[-20px] left-1/2 -translate-x-1/2 translate-y-full flex flex-col bg-[#0a0a0c]/95 backdrop-blur-3xl border border-white/[0.1] rounded-[24px] shadow-[0_40px_100px_rgba(0,0,0,0.95)] transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] z-[100] ${(!data.globalCamera || selectedText ? 'w-auto p-1.5 flex-row items-center gap-2 scale-100 opacity-100' : 'scale-90 opacity-0 pointer-events-none')}`}>
         {!data.globalCamera ? (
           <>
-            <CustomSelect menuPosition="left" className="w-[160px] bg-transparent" value={data.model || 'deepseek-v4-pro'} options={[{ value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' }, { value: 'gpt-5.4', label: 'GPT-5.4 (智能)' }]} onChange={(v: string) => updateNodeData(id, { model: v })} />
+            <CustomSelect menuPosition="left" className="w-[170px] bg-transparent" value={data.model || 'deepseek-v4-pro'} options={[{ value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' }, { value: 'gpt-5.4', label: 'GPT-5.4 (智能)' }, { value: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro' }, { value: 'gemini-3.5-flash', label: 'Gemini 3.5' }]} onChange={(v: string) => updateNodeData(id, { model: v })} />
             <div className="w-px h-5 bg-white/10 mx-1"></div>
             <button onClick={handleExtractCamera} disabled={data.isExtractingCamera} className="flex items-center justify-center gap-2 px-5 py-2 bg-indigo-500 text-white hover:bg-indigo-400 rounded-[12px] text-[12px] font-bold transition-all shadow-[0_0_20px_rgba(99,102,241,0.4)] whitespace-nowrap nodrag">
                {data.isExtractingCamera ? <Loader2 size={14} className="animate-spin" /> : <Settings2 size={14} />} 锚定全片摄影机
@@ -867,7 +867,7 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
           </>
         ) : (
           <>
-            <CustomSelect menuPosition="left" className="w-[160px] bg-transparent" value={data.model || 'deepseek-v4-pro'} options={[{ value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' }, { value: 'gpt-5.4', label: 'GPT-5.4 (智能)' }]} onChange={(v: string) => updateNodeData(id, { model: v })} />
+            <CustomSelect menuPosition="left" className="w-[170px] bg-transparent" value={data.model || 'deepseek-v4-pro'} options={[{ value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' }, { value: 'gpt-5.4', label: 'GPT-5.4 (智能)' }, { value: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro' }, { value: 'gemini-3.5-flash', label: 'Gemini 3.5' }]} onChange={(v: string) => updateNodeData(id, { model: v })} />
             <div className="w-px h-5 bg-white/10 mx-1"></div>
             
             <button onClick={handleFissionShots} disabled={data.isGenerating} className="flex items-center gap-1.5 px-6 py-2 text-[12px] font-bold text-white bg-indigo-500 hover:bg-indigo-400 rounded-[12px] transition-all shadow-[0_0_20px_rgba(99,102,241,0.5)] nodrag whitespace-nowrap">
