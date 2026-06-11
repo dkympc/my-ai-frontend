@@ -50,11 +50,11 @@ export function useCanvasEngine() {
   const buildImagePayload = (data: any, settings: any, externalRefs?: string[]) => {
     // 1. 风格拦截与覆写逻辑
     const styleOverride = data.styleOverride || '继承全局预设';
-    const globalSuffix = settings?.globalPromptSuffix ? `, ${settings.globalPromptSuffix}` : '';
     let finalStyle = '';
     
+    // 🚨 核心切断：如果是“继承全局预设”（即没有强选下拉框里的电影/二次元），我们什么都不拼！保持 prompt 的绝对纯净和所见即所得！
     if (styleOverride === '继承全局预设') {
-        finalStyle = globalSuffix;
+        finalStyle = ''; 
       } else if (styleOverride === '🎬 电影质感') {
         finalStyle = ', Cinematic lighting, 8k resolution, highly detailed, masterpiece, 85mm lens';
       } else if (styleOverride === '🌸 二次元') {

@@ -335,14 +335,14 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
         media.src = asset.url;
         
         const createNodeWithRatio = (finalRatio: string) => {
-           const newNode = { 
-             id: `node_${Date.now()}`, type: isVideo ? 'render' : 'media', position, 
-             data: { 
-               asset, ratio: finalRatio, 
-               model: isVideo ? (canvasSettings?.defaultVideoModel || 'doubao-seedance-2-0') : (canvasSettings?.defaultImageModel || 'gpt-image-2'), 
-               prompt: (asset.prompt || '') + (canvasSettings?.globalPromptSuffix ? `, ${canvasSettings.globalPromptSuffix}` : '')
-             } 
-           };
+          const newNode = { 
+            id: `node_${Date.now()}`, type: isVideo ? 'render' : 'media', position, 
+            data: { 
+              asset, ratio: finalRatio, 
+              model: isVideo ? (canvasSettings?.defaultVideoModel || 'doubao-seedance-2-0') : (canvasSettings?.defaultImageModel || 'gpt-image-2'), 
+              prompt: asset.prompt || '' // 🚨 移除隐式拼接
+            } 
+          };
            setNodes((nds) => [...nds, newNode]);
         };
 
@@ -401,13 +401,13 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
                }
 
                const newNode = { 
-                 id: `node_${Date.now()}`, type: isVideo ? 'render' : 'media', position, 
-                 data: { 
-                   asset, ratio: finalRatio,
-                   model: isVideo ? (canvasSettings?.defaultVideoModel || 'doubao-seedance-2-0') : (canvasSettings?.defaultImageModel || 'gpt-image-2'), 
-                   prompt: file.name + (canvasSettings?.globalPromptSuffix ? `, ${canvasSettings.globalPromptSuffix}` : '') 
-                 } 
-               };
+                id: `node_${Date.now()}`, type: isVideo ? 'render' : 'media', position, 
+                data: { 
+                  asset, ratio: finalRatio,
+                  model: isVideo ? (canvasSettings?.defaultVideoModel || 'doubao-seedance-2-0') : (canvasSettings?.defaultImageModel || 'gpt-image-2'), 
+                  prompt: file.name // 🚨 移除隐式拼接
+                } 
+              };
                setNodes((nds) => [...nds, newNode]);
             };
 

@@ -2760,7 +2760,7 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
 
     updateRow(rowId, 'isGenerating', true);
     
-    // 动态提取下拉框选择的画风，但不污染输入框，直接拼接在接口请求里
+    // 🚨 核心切断：拒绝隐式获取右上角预设。下拉框没选强覆写，就不加任何尾巴，保证所见即所得！
     const styleStr = (data.styleOverride && data.styleOverride !== '继承全局预设') ? `, ${data.styleOverride}` : '';
     const finalPromptForApi = `${row.prompt}${styleStr}`;
 
