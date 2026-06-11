@@ -2783,6 +2783,7 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
     } finally {
       updateRow(rowId, 'isGenerating', false);
     }
+  }; // 🚨 核心修复1：必须补上这行 }; 把单行生成函数闭合掉！
 
   // ✨ 批量生成逻辑
   const handleBatchGenerate = () => {
@@ -2959,12 +2960,10 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
            ))}
         </div>
 
-        {/* 添加行按钮 */}
         <button onClick={addRow} className="mt-3 w-full py-2 border border-dashed border-white/10 hover:border-white/30 bg-white/[0.01] hover:bg-white/[0.05] rounded-[10px] flex items-center justify-center gap-2 text-[11px] font-bold text-zinc-500 hover:text-white transition-all nodrag">
           <Plus size={14} /> 新增自定义行
         </button>
       </div>
     </div>
-   );
-  };
- }
+  );
+}; // 🚨 核心修复2：删掉多余的反大括号，正确闭合整个组件
