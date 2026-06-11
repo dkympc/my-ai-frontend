@@ -1321,7 +1321,7 @@ export const ShotNode = ({ id, data, selected }: any) => {
                           <div className="flex flex-col gap-1">
                              <label className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest">画面比例 (Ratio)</label>
                              <div className="flex gap-1 bg-black/40 p-1 rounded-[8px] border border-white/5">
-                               {['16:9', '9:16', '1:1'].map(r => (
+                               {['16:9', '9:16', '1:1', '4:3', '3:4'].map(r => (
                                  <button key={r} onClick={() => updateNodeData(id, { ratio: r })} className={`flex-1 py-1 text-[10px] rounded-[4px] transition-all nodrag ${data.ratio === r ? 'bg-white/10 text-white' : 'text-zinc-500 hover:text-white'}`}>{r}</button>
                                ))}
                              </div>
@@ -1937,27 +1937,23 @@ export const MediaNode = ({ id, data, selected }: any) => {
 
       if (targetModel.includes('seedream')) {
         const srMap: Record<string, string> = {
-          '1:1': '1920x1920',
-          '16:9': '2560x1440',
-          '9:16': '1440x2560',
-          '4:3': '2048x1536',
+          '1:1': '1920x1920', '16:9': '2560x1440', '9:16': '1440x2560', '4:3': '2048x1536', '3:4': '1536x2048'
         };
         targetSize = srMap[targetRatio] || '2560x1440';
+      } else if (targetModel === 'gpt-image-2') {
+        const gptMap: Record<string, string> = {
+          '1:1': '1024x1024', '16:9': '1792x1024', '9:16': '1024x1792', '4:3': '1792x1024', '3:4': '1024x1792'
+        };
+        targetSize = gptMap[targetRatio] || '1024x1024';
       } else {
         if (isHD) {
           const hdMap: Record<string, string> = {
-            '1:1': '2048x2048',
-            '16:9': '1920x1080',
-            '9:16': '1080x1920',
-            '4:3': '2048x1536',
+            '1:1': '2048x2048', '16:9': '1920x1080', '9:16': '1080x1920', '4:3': '2048x1536', '3:4': '1536x2048'
           };
           targetSize = hdMap[targetRatio] || '1920x1080';
         } else if (isUltra) {
           const ultraMap: Record<string, string> = {
-            '1:1': '4096x4096',
-            '16:9': '3840x2160',
-            '9:16': '2160x3840',
-            '4:3': '4096x3072',
+            '1:1': '4096x4096', '16:9': '3840x2160', '9:16': '2160x3840', '4:3': '4096x3072', '3:4': '3072x4096'
           };
           targetSize = ultraMap[targetRatio] || '3840x2160';
         }
@@ -2712,9 +2708,39 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
     }
   };
 
+  // ✨ 核心修复：使用 setNodes 进行安全的函数式更新，彻底解决异步状态互相覆盖导致图片丢失的问题
   const updateRow = (rowId: string, field: string, value: any) => {
-    const newRows = data.rows?.map((r: any) => r.id === rowId ? { ...r, [field]: value } : r);
-    updateNodeData(id, { rows: newRows });
+    setNodes(nds => nds.map(n => {
+      if (n.id === id) {
+         const newRows = n.data.rows?.map((r: any) => r.id === rowId ? { ...r, [field]: value } : r);
+         return { ...n, data: { ...n.data, rows: newRows } };
+      }
+      return n;
+    }));
+  };
+
+  // ✨ 新增：支持一次性同时更新多个字段（专门防覆盖）
+  const updateRowMulti = (rowId: string, updates: any) => {
+    setNodes(nds => nds.map(n => {
+      if (n.id === id) {
+         const newRows = n.data.rows?.map((r: any) => r.id === rowId ? { ...r, ...updates } : r);
+         return { ...n, data: { ...n.data, rows: newRows } };
+      }
+      return n;
+    }));
+  };
+
+  // ✨ 新增：补齐缺失的文件上传解析逻辑
+  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>, rowId: string) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const result = ev.target?.result as string;
+        updateRow(rowId, 'resultUrl', result);
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const addRow = () => {
@@ -2745,18 +2771,23 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
     let targetSize = '1024x1024';
     if (targetModel.includes('seedream')) {
       const srMap: Record<string, string> = {
-        '1:1': '1920x1920', '16:9': '2560x1440', '9:16': '1440x2560', '4:3': '2048x1536'
+        '1:1': '1920x1920', '16:9': '2560x1440', '9:16': '1440x2560', '4:3': '2048x1536', '3:4': '1536x2048'
       };
       targetSize = srMap[targetRatio] || '2560x1440';
+    } else if (targetModel === 'gpt-image-2') {
+      const gptMap: Record<string, string> = {
+        '1:1': '1024x1024', '16:9': '1792x1024', '9:16': '1024x1792', '4:3': '1792x1024', '3:4': '1024x1792'
+      };
+      targetSize = gptMap[targetRatio] || '1024x1024';
     } else {
       if (isHD) {
         const hdMap: Record<string, string> = {
-          '1:1': '2048x2048', '16:9': '1920x1080', '9:16': '1080x1920', '4:3': '2048x1536'
+          '1:1': '2048x2048', '16:9': '1920x1080', '9:16': '1080x1920', '4:3': '2048x1536', '3:4': '1536x2048'
         };
         targetSize = hdMap[targetRatio] || '1920x1080';
       } else {
         const defaultMap: Record<string, string> = {
-          '1:1': '1024x1024', '16:9': '1024x576', '9:16': '576x1024', '4:3': '1024x768'
+          '1:1': '1024x1024', '16:9': '1024x576', '9:16': '576x1024', '4:3': '1024x768', '3:4': '768x1024'
         };
         targetSize = defaultMap[targetRatio] || '1024x576';
       }
@@ -2769,20 +2800,23 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
       size: targetSize,
       n: 1
     };
-    try {                                          // 👈 新增这一行
+    try {                                          
       const response = await fetchApi('/v1/images/generations', { method: 'POST', body: JSON.stringify(payload) });
       const resData = await response.json();
       const url = resData.data?.[0]?.url || resData.url;
 
       if (url) {
-         updateRow(rowId, 'resultUrl', url);
+         // ✨ 核心修复：同时写入 URL 和关闭 Loading 状态，防止 finally 把状态冲刷掉
+         updateRowMulti(rowId, { resultUrl: url, isGenerating: false });
          saveToAssets(url, finalPromptForApi);
-      } else throw new Error("API未返回图片");
+      } else {
+         throw new Error("API未返回图片");
+      }
     } catch (e) {
       useAppStore.getState().setToastMsg("生成失败，请检查网络或算力");
-    } finally {
       updateRow(rowId, 'isGenerating', false);
-    }
+    } 
+    // 🚨 删除了 finally 块，让成功和失败分支自己管理 Loading 关闭
   }; // 🚨 核心修复1：必须补上这行 }; 把单行生成函数闭合掉！
 
   // ✨ 批量生成逻辑

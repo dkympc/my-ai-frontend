@@ -79,15 +79,19 @@ export function useCanvasEngine() {
 
     let targetSize = '1024x1024';
     if (targetModel.includes('seedream')) {
-      const srMap: Record<string, string> = { '1:1': '1920x1920', '16:9': '2560x1440', '9:16': '1440x2560', '4:3': '2048x1536' };
+      const srMap: Record<string, string> = { '1:1': '1920x1920', '16:9': '2560x1440', '9:16': '1440x2560', '4:3': '2048x1536', '3:4': '1536x2048' };
       targetSize = srMap[data.ratio || '16:9'] || '2560x1440';
+    } else if (targetModel === 'gpt-image-2') {
+      // 🚨 核心修复：GPT-Image-2 必须使用原生尺寸，否则上游 API 会强行添加白边补成正方形
+      const gptMap: Record<string, string> = { '1:1': '1024x1024', '16:9': '1792x1024', '9:16': '1024x1792', '4:3': '1792x1024', '3:4': '1024x1792' };
+      targetSize = gptMap[data.ratio || '16:9'] || '1024x1024';
     } else {
-      // 如果选了高清，且不是 seedream，强制升维分辨率
+      // Banana / 其他模型
       if (isHD) {
-        const hdMap: Record<string, string> = { '1:1': '2048x2048', '16:9': '1920x1080', '9:16': '1080x1920', '4:3': '2048x1536' };
+        const hdMap: Record<string, string> = { '1:1': '2048x2048', '16:9': '1920x1080', '9:16': '1080x1920', '4:3': '2048x1536', '3:4': '1536x2048' };
         targetSize = hdMap[data.ratio || '16:9'] || '1920x1080';
       } else {
-        const defaultMap: Record<string, string> = { '1:1': '1024x1024', '16:9': '1024x576', '9:16': '576x1024', '4:3': '1024x768' };
+        const defaultMap: Record<string, string> = { '1:1': '1024x1024', '16:9': '1024x576', '9:16': '576x1024', '4:3': '1024x768', '3:4': '768x1024' };
         targetSize = defaultMap[data.ratio || '16:9'] || '1024x576';
       }
     }
