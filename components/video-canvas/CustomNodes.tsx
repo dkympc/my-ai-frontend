@@ -8,6 +8,28 @@ import {
 } from 'lucide-react';
 import { fetchApi } from '@/services/api';
 
+// ✨ 放在 CustomNodes.tsx 文件顶部 imports 区域下方
+const compressImage = (file: File, maxWidth = 1024): Promise<string> => {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let w = img.width, h = img.height;
+        if (w > maxWidth) { h = Math.round(h * maxWidth / w); w = maxWidth; }
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, w, h);
+        // 强制转为 JPEG 并压缩到 80% 质量，体积缩小 90%
+        resolve(canvas.toDataURL('image/jpeg', 0.8)); 
+      };
+      img.src = e.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+};
+
 // ✨ 高级黑玻璃禅定编辑器 (Zen Mode)
 const ZenEditor = ({ value, onChange, label, onClose, placeholder, onWheelCapture, incomingAssets = [] }: any) => {
   return createPortal(
@@ -2147,23 +2169,34 @@ export const MediaNode = ({ id, data, selected }: any) => {
                 }
               `}} />
               
-              <input type="file" id={`upload-${id}`} className="hidden" accept="image/*" onChange={(e) => {
-                 const file = e.target.files?.[0];
-                 if(file) {
-                    const reader = new FileReader();
-                    reader.onload = (ev) => {
-                       const result = ev.target?.result as string;
-                       const img = new Image(); img.src = result;
-                       img.onload = () => {
-                          const ratioValue = img.naturalWidth / img.naturalHeight;
-                          let finalRatio = '16:9';
-                          if (ratioValue < 0.8) finalRatio = '9:16'; else if (ratioValue >= 0.8 && ratioValue < 1.2) finalRatio = '1:1'; else if (ratioValue >= 1.2 && ratioValue < 1.5) finalRatio = '4:3';
-                          updateNodeData(id, { resultUrl: result, ratio: finalRatio });
-                       }
-                    };
-                    reader.readAsDataURL(file);
-                 }
-              }} />
+
+                <input
+                  type="file"
+                  id={`upload-video-${id}`}
+                  className="hidden"
+                  accept="video/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+      // 🚨 绝对禁止用 FileReader 读取视频！改用 createObjectURL
+                      const objectUrl = URL.createObjectURL(file);
+                      const vid = document.createElement('video');
+                      vid.src = objectUrl;
+                      vid.onloadedmetadata = () => {
+                        const w = vid.videoWidth;
+                        const h = vid.videoHeight;
+                        const ratioValue = w / h;
+                        let finalRatio = '16:9';
+                        if (ratioValue < 0.8) finalRatio = '9:16';
+                        else if (ratioValue >= 0.8 && ratioValue < 1.2) finalRatio = '1:1';
+                        else if (ratioValue >= 1.2 && ratioValue < 1.5) finalRatio = '4:3';
+        
+        // 瞬间完成预览，且几乎 0 内存占用
+                        updateNodeData(id, { videoUrl: objectUrl, ratio: finalRatio, prompt: file.name, isGenerating: false });
+                      };
+                    }
+                  }}
+                 />
               
               {data.isGenerating ? (
                  <div className="z-10 flex flex-col items-center">
@@ -2731,15 +2764,13 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
   };
 
   // ✨ 新增：补齐缺失的文件上传解析逻辑
-  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>, rowId: string) => {
+  // 🔍 找到 AssetTableNode 里的 handleUpload 函数并替换
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>, rowId: string) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const result = ev.target?.result as string;
-        updateRow(rowId, 'resultUrl', result);
-      };
-      reader.readAsDataURL(file);
+      // ✨ 核心修复：同样使用压缩滤网
+      const compressedBase64 = await compressImage(file);
+      updateRow(rowId, 'resultUrl', compressedBase64);
     }
   };
 
@@ -2980,7 +3011,21 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
                         <button onClick={() => handleGenerateRow(row.id)} className="px-3 py-1.5 bg-white text-black hover:scale-105 rounded-[6px] text-[10px] font-bold flex items-center gap-1 shadow-[0_0_15px_rgba(255,255,255,0.2)] transition-all nodrag"><Wand2 size={12}/> 生成</button>
                         <label className="px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-[6px] text-[10px] text-zinc-300 hover:text-white flex items-center gap-1 cursor-pointer transition-all nodrag">
                            <Upload size={12}/> 上传
-                           <input type="file" className="hidden" accept="image/*" onChange={(e) => handleUpload(e, row.id)} />
+                           <input type="file" id={`upload-${id}`} className="hidden" accept="image/*" onChange={async (e) => {
+                 const file = e.target.files?.[0];
+                 if(file) {
+                    // ✨ 核心修复：调用压缩滤网
+                    const compressedBase64 = await compressImage(file);
+                    const img = new Image(); 
+                    img.src = compressedBase64;
+                    img.onload = () => {
+                       const ratioValue = img.naturalWidth / img.naturalHeight;
+                       let finalRatio = '16:9';
+                       if (ratioValue < 0.8) finalRatio = '9:16'; else if (ratioValue >= 0.8 && ratioValue < 1.2) finalRatio = '1:1'; else if (ratioValue >= 1.2 && ratioValue < 1.5) finalRatio = '4:3';
+                       updateNodeData(id, { resultUrl: compressedBase64, ratio: finalRatio });
+                    }
+                 }
+              }} />
                         </label>
                       </div>
                    )}
