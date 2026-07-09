@@ -16,11 +16,12 @@ interface AppState {
   canvasProjects?: any[]; 
   updateCanvasProject?: (id: string, data: any) => void; 
     // ✨ 新增画布全局设置
-  canvasSettings: { defaultImageModel: string; defaultVideoModel: string; globalPromptSuffix: string; };
+  canvasSettings: { defaultImageModel: string; defaultVideoModel: string; globalPromptSuffix: string; globalRatio: string; };
   setCanvasSettings: (updater: any) => void;
   activeView: 'chat' | 'image-gen' | 'video-gen' | 'workflow-gallery' | 'workflow-execution' | 'video-canvas';
   activeCanvasProjectId: string | null;
   isSettingsModalOpen: boolean;
+  isFilmControlOpen: boolean; // ✨ 新增：影视中控台抽屉开关状态
   settings: AppSettings;
   toastMsg: string | null;
   outOfBalanceMsg: string | null;
@@ -28,6 +29,7 @@ interface AppState {
   setActiveView: (view: 'chat' | 'image-gen' | 'video-gen' | 'workflow-gallery' | 'workflow-execution' | 'video-canvas') => void;
   setActiveCanvasProjectId: (id: string | null) => void;
   setIsSettingsModalOpen: (isOpen: boolean) => void;
+  setIsFilmControlOpen: (isOpen: boolean) => void; // ✨ 新增：设置开关函数
   setSettings: (settings: AppSettings | ((prev: AppSettings) => AppSettings)) => void;
   setToastMsg: (msg: string | null) => void;
   setOutOfBalanceMsg: (msg: string | null) => void;
@@ -38,7 +40,7 @@ interface AppState {
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
-      canvasSettings: { defaultImageModel: 'gpt-image-2', defaultVideoModel: 'doubao-seedance-2-0-260128', globalPromptSuffix: '' },
+      canvasSettings: { defaultImageModel: 'gpt-image-2', defaultVideoModel: 'doubao-seedance-2-0-260128', globalPromptSuffix: '', globalRatio: '16:9' },
       setCanvasSettings: (updater) => set((state) => ({
         canvasSettings: typeof updater === 'function' ? updater(state.canvasSettings) : updater
       })),
@@ -55,6 +57,7 @@ export const useAppStore = create<AppState>()(
       }),
       activeCanvasProjectId: null,
       isSettingsModalOpen: false,
+      isFilmControlOpen: false, // ✨ 新增：中控台默认关闭
       settings: {
         nickname: '', avatar: '', globalSystemPrompt: '', modelSystemPrompts: {},
         temperature: 0.7, topP: 1.0, maxTokens: ''
@@ -65,6 +68,7 @@ export const useAppStore = create<AppState>()(
       setActiveView: (view) => set({ activeView: view }),
       setActiveCanvasProjectId: (id) => set({ activeCanvasProjectId: id }),
       setIsSettingsModalOpen: (isOpen) => set({ isSettingsModalOpen: isOpen }),
+      setIsFilmControlOpen: (isOpen) => set({ isFilmControlOpen: isOpen }), // ✨ 新增：中控台开关绑定
       setSettings: (updater) => set((state) => ({
         settings: typeof updater === 'function' ? updater(state.settings) : updater
       })),
@@ -83,7 +87,8 @@ export const useAppStore = create<AppState>()(
           updatedAt: p.updatedAt
         })),
         activeView: state.activeView,
-        activeCanvasProjectId: state.activeCanvasProjectId
+        activeCanvasProjectId: state.activeCanvasProjectId,
+        isFilmControlOpen: state.isFilmControlOpen // ✨ 核心修复：将抽屉开启状态加入白名单
       }),
     }
   )

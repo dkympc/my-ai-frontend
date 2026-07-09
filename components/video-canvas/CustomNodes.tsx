@@ -30,6 +30,29 @@ const compressImage = (file: File, maxWidth = 1024): Promise<string> => {
   });
 };
 
+// ✨ 新增：强制本地转换下载引擎（解决跨域图片跳页面的Bug）
+const forceDownload = async (url: string, filename: string) => {
+  try {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(blobUrl);
+  } catch (error) {
+    // 降级方案：如果极端情况 fetch 失败，使用原版跳转
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.target = '_blank';
+    a.click();
+  }
+};
+
 // ✨ 高级黑玻璃禅定编辑器 (Zen Mode)
 const ZenEditor = ({ value, onChange, label, onClose, placeholder, onWheelCapture, incomingAssets = [] }: any) => {
   return createPortal(
@@ -59,6 +82,28 @@ const ZenEditor = ({ value, onChange, label, onClose, placeholder, onWheelCaptur
 
 import { useAppStore } from '@/store/useAppStore'; 
 import { useCanvasEngine } from '@/hooks/useCanvasEngine';
+
+// ✨ 多模型差异化分辨率动态选项生成器
+// 依据后端及 useCanvasEngine.ts 所设定的参数进行严格物理对齐，防止因比例/精度不符导致 400 报错
+const getImageQualityOptions = (model: string) => {
+  if (model === 'seedream5.0') {
+    return [
+      { value: '2K', label: '2K (高清)' },
+      { value: '3K', label: '3K (极致)' }
+    ];
+  }
+  if (model === 'banana-pro') {
+    return [
+      { value: '1K', label: '1K (标准)' },
+      { value: '2K', label: '2K (高清)' },
+      { value: '4K', label: '4K (极致)' }
+    ];
+  }
+  // gpt-image-2 或其它默认模型仅支持 1K（通过 prompt 拼装实现）
+  return [
+    { value: '1K', label: '1K (标准)' }
+  ];
+};
 
 // ==========================================
 // ==========================================
@@ -653,6 +698,19 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
         
         const fullVideoPrompt = `时长：${shot.duration || 5}s\n场景：${shot.scene || '未知'} / 出场人物：${shot.characters || '无'}\n\n画面主体（包含场景变化等等）：\n${timeSegmentsText}\n\n音效与台词设计：\n* 音效：${shot.soundDesign?.audio || '无'}\n* 台词：${shot.soundDesign?.dialogue || '无'}\n\n每个时间段的机位规则：\n${shot.cameraRules || '无'}\n\n全局约束：\n* 禁止：字幕、BGM、人物滤镜，完美人物，画面闪烁，人物漂移，手部畸形。\n* 通用基础约束：Photorealistic film still look, cinematic lighting, not 3D render, not CGI, not anime, no subtitles, no watermark, organic film noise.\n* 角色肤质约束：[粗糙皮肤，可见毛孔，细微绒毛，皮肤瑕疵，明显细纹，1:1真实肤色]`;
 
+        // ✨ 裂变默认继承联动机制：新生成的 ShotNode 默认带上中控的 globalRatio 与 globalPromptSuffix
+        const globalSettings = useAppStore.getState().canvasSettings;
+        const inheritedRatioOverride = globalSettings?.globalRatio || '16:9';
+        const inheritedSuffix = globalSettings?.globalPromptSuffix || '';
+
+        // 智能追加后缀
+        let finalFirstFrame = shot.imagePrompt || "空镜头。";
+        let finalVideoPromptText = fullVideoPrompt;
+        if (inheritedSuffix.trim()) {
+           finalFirstFrame = `${finalFirstFrame}\n, ${inheritedSuffix}`;
+           finalVideoPromptText = `${fullVideoPrompt}\n, ${inheritedSuffix}`;
+        }
+
         const newShot = {
           id: shotId, type: 'shot', 
           position: { x: targetColumnX, y: targetY },
@@ -665,8 +723,15 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
             referenceImage: null,
             wordCount: shot.wordCount || 0,
             duration: shot.duration || 5,
-            firstFrameAnchor: shot.imagePrompt || "空镜头。",
-            videoPrompt: fullVideoPrompt,
+            
+            // 记录原始 Prompt 与 已追加后缀印记，防套娃污染
+            originalFirstFrameAnchor: shot.imagePrompt || "空镜头。",
+            originalVideoPrompt: fullVideoPrompt,
+            firstFrameAnchor: finalFirstFrame,
+            videoPrompt: finalVideoPromptText,
+            lastAppliedSuffix: inheritedSuffix,
+            globalRatioOverride: inheritedRatioOverride, // 自动继承全局比例
+
             isParsing: false
           }
         };
@@ -928,13 +993,20 @@ export const ShotNode = ({ id, data, selected }: any) => {
   const [showConfig, setShowConfig] = useState(false);
   const [showHDSettings, setShowHDSettings] = useState(false);
   const [isAnnotating, setIsAnnotating] = useState(false);
+  
+  // ✨ 新增下拉框状态
+  const [showAssetDropdown, setShowAssetDropdown] = useState(false);
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [brushColor, setBrushColor] = useState('#ff0000');
   const [brushSize, setBrushSize] = useState(4);
   const imgRef = useRef<HTMLImageElement>(null);
 
   const ratioStyleMap: Record<string, React.CSSProperties> = { '16:9': { aspectRatio: '16/9' }, '9:16': { aspectRatio: '9/16' }, '1:1': { aspectRatio: '1/1' }, '4:3': { aspectRatio: '4/3' }, '3:4': { aspectRatio: '3/4' } };
-  const currentStyle = ratioStyleMap[data.ratio || '16:9'] || ratioStyleMap['16:9'];
+  
+  // ✨ 核心机制：比例优先级。单分镜节点 ratio 属性最高，其次为全局穿透的 globalRatioOverride，最后默认 16:9
+  const activeRatio = data.ratio || data.globalRatioOverride || '16:9';
+  const currentStyle = ratioStyleMap[activeRatio] || ratioStyleMap['16:9'];
 
   const incomingAssets = edges.filter(e => e.target === id).map(e => {
     const srcNode = nodes.find(n => n.id === e.source);
@@ -949,6 +1021,33 @@ export const ShotNode = ({ id, data, selected }: any) => {
 
   const { enqueueTask } = useCanvasEngine();
   const showToast = (msg: string) => useAppStore.getState().setToastMsg(msg);
+
+  // ✨ 新增：扫描画布上所有可用的独立资产节点
+  const availableAssets = nodes.filter(n => 
+    n.type === 'media' && 
+    (n.data?.resultUrl || n.data?.asset?.url) && 
+    n.id !== id && 
+    !edges.some(e => e.source === n.id && e.target === id) 
+  );
+
+  // ✨ 新增：自动施法，创建物理连线
+  const handleAddAssetEdge = (sourceId: string) => {
+    setEdges((eds) => [
+      ...eds,
+      {
+        id: `e-${sourceId}-${id}-${Date.now()}`,
+        source: sourceId,
+        target: id,
+        sourceHandle: 'right',
+        targetHandle: 'left',
+        type: 'default',
+        animated: true,
+        style: { stroke: 'rgba(255, 255, 255, 0.2)', strokeWidth: 1.5, strokeDasharray: '8 8', animationDuration: '10s' }
+      }
+    ]);
+    setShowAssetDropdown(false);
+    useAppStore.getState().setToastMsg("🔗 资产连线成功！");
+  };
 
   // 高清放大确认
   const handleHDConfirm = () => {
@@ -1289,14 +1388,40 @@ export const ShotNode = ({ id, data, selected }: any) => {
             </div>
 
             <div className="flex flex-col gap-1.5 mb-3 bg-[#050505]/50 p-2.5 rounded-[16px] border border-white/5 group/zen1 focus-within:border-white/20 transition-colors shadow-inner">
-               <label className="text-[9px] font-bold text-zinc-400 flex justify-between items-center">
-                  <div className="flex items-center gap-2">
+               <div className="flex justify-between items-center relative z-50">
+                 <label className="text-[9px] font-bold text-zinc-400 flex items-center gap-2">
                     首帧锚定轨 
                     {data.styleOverride && data.styleOverride !== '继承全局预设' && <span className="bg-white/10 text-white px-1.5 py-0.5 rounded text-[8px] font-mono border border-white/20">STYLE: {data.styleOverride.split(' ')[0]}</span>}
-                  </div>
-                  <button onClick={() => setZenMode({ field: 'firstFrameAnchor', label: '首帧描述' })} className="opacity-0 group-hover/zen1:opacity-100 text-zinc-400 hover:text-white transition-colors"><Expand size={10}/></button>
-               </label>
-                              {/* 🆕 已连线参考图小预览 */}
+                 </label>
+                 <div className="flex items-center gap-1">
+                    <button onClick={() => setShowAssetDropdown(!showAssetDropdown)} className="flex items-center gap-1 px-1.5 py-0.5 bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/40 rounded-[6px] text-[9px] font-bold transition-all nodrag"><Plus size={10}/> 引入资产</button>
+                    <button onClick={() => setZenMode({ field: 'firstFrameAnchor', label: '首帧描述' })} className="opacity-0 group-hover/zen1:opacity-100 text-zinc-400 hover:text-white transition-colors p-1"><Expand size={10}/></button>
+                 </div>
+                 
+                 {/* 资产下拉框 */}
+                 {showAssetDropdown && (
+                    <div className="absolute top-[100%] right-0 mt-2 w-[220px] bg-[#0a0a0c]/95 backdrop-blur-3xl border border-white/20 rounded-[12px] shadow-[0_20px_60px_rgba(0,0,0,0.9)] p-1.5 z-[9999] animate-in fade-in zoom-in-95 max-h-[200px] overflow-y-auto custom-scrollbar nodrag nopan" onClick={e => e.stopPropagation()} onWheelCapture={e => e.stopPropagation()}>
+                       <div className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest px-2 pb-1 mb-1 border-b border-white/10 flex justify-between items-center">
+                          点击即可飞线
+                          <button onClick={() => setShowAssetDropdown(false)} className="hover:text-white"><X size={10}/></button>
+                       </div>
+                       {availableAssets.length === 0 ? (
+                          <div className="text-[10px] text-zinc-500 p-3 text-center font-light">
+                             画布中暂无多余图片节点<br/>请先从右侧表格提取
+                          </div>
+                       ) : (
+                          availableAssets.map((assetNode: any) => (
+                             <div key={assetNode.id} onClick={() => handleAddAssetEdge(assetNode.id)} className="flex items-center gap-2 px-2 py-1.5 hover:bg-white/10 rounded-[8px] cursor-pointer transition-colors group/item">
+                                <img src={assetNode.data?.resultUrl || assetNode.data?.asset?.url} className="w-7 h-7 rounded-[6px] object-contain bg-black/50 border border-white/10" />
+                                <span className="text-[11px] text-zinc-300 font-medium group-hover/item:text-white truncate flex-1">{assetNode.data?.name || '未命名资产'}</span>
+                             </div>
+                          ))
+                       )}
+                    </div>
+                 )}
+               </div>
+               
+               {/* 🆕 已连线参考图小预览 */}
                               {incomingAssets.filter((a:any) => a._type === 'image').length > 0 && (
                  <div className="flex gap-2 mb-1 flex-wrap">
                    {incomingAssets.filter((a:any) => a._type === 'image').map((asset: any, idx: number) => (
@@ -1330,10 +1455,25 @@ export const ShotNode = ({ id, data, selected }: any) => {
   options={[
     { value: 'gpt-image-2', label: 'GPT-Image-2' },
     { value: 'banana-pro', label: 'Banana Pro' },
-    { value: 'banana2', label: 'Banana 2' },
     { value: 'seedream5.0', label: 'Seedream 5.0' }
   ]} 
-  onChange={(v: string) => updateNodeData(id, { model: v })} 
+  onChange={(v: string) => {
+    // ✨【防呆分辨率自动重置机制】
+    // 自动核对新选模型是否兼容当前画质，如果不匹配，立即重设为对应模型的安全默认值
+    let nextQuality = data.quality || '1K';
+    if (v === 'seedream5.0') {
+      if (!['2K', '3K'].includes(nextQuality)) {
+        nextQuality = '2K';
+      }
+    } else if (v === 'banana-pro') {
+      if (!['1K', '2K', '4K'].includes(nextQuality)) {
+        nextQuality = '2K';
+      }
+    } else {
+      nextQuality = '1K';
+    }
+    updateNodeData(id, { model: v, quality: nextQuality });
+  }} 
 />
                  
                  <div className="relative group/cfg">
@@ -1350,7 +1490,13 @@ export const ShotNode = ({ id, data, selected }: any) => {
                           </div>
                           <div className="flex flex-col gap-1 z-10">
                              <label className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest">画质设定 (Quality)</label>
-                             <CustomSelect menuPosition="top" className="w-full bg-black/40 border border-white/5 text-zinc-300 rounded-[8px]" value={data.quality || '标准 Standard'} options={[{ value: '标准 Standard', label: '标准 Standard (2K内)' }, { value: '高清 HD (耗时)', label: '极致 Ultra (4K)' }]} onChange={(v: string) => updateNodeData(id, { quality: v })} />
+                             <CustomSelect 
+                                menuPosition="top" 
+                                className="w-full bg-black/40 border border-white/5 text-zinc-300 rounded-[8px]" 
+                                value={data.quality || (data.model === 'seedream5.0' ? '2K' : '1K')} 
+                                options={getImageQualityOptions(data.model || 'gpt-image-2')} 
+                                onChange={(v: string) => updateNodeData(id, { quality: v })} 
+                             />
                           </div>
                           <div className="flex flex-col gap-1 z-20">
                              <label className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest">风格强覆写 (Override)</label>
@@ -1398,7 +1544,10 @@ export const VideoClipNode = ({ id, data, selected }: any) => {
   const [showConfig, setShowConfig] = useState(false);
   const [zenMode, setZenMode] = useState<any>(null);
   const ratioStyleMap: Record<string, React.CSSProperties> = { '16:9': { aspectRatio: '16/9' }, '9:16': { aspectRatio: '9/16' }, '1:1': { aspectRatio: '1/1' }, '4:3': { aspectRatio: '4/3' }, '3:4': { aspectRatio: '3/4' } };
-  const currentStyle = ratioStyleMap[data.ratio || '16:9'] || ratioStyleMap['16:9'];
+  
+  // ✨ 核心机制：比例优先级。单视频节点 ratio 属性最高，其次为全局穿透的 globalRatioOverride，最后默认 16:9
+  const activeRatio = data.ratio || data.globalRatioOverride || '16:9';
+  const currentStyle = ratioStyleMap[activeRatio] || ratioStyleMap['16:9'];
 
   const incomingAssets = edges.filter(e => e.target === id).map(e => {
     const srcNode = nodes.find(n => n.id === e.source);
@@ -1799,6 +1948,7 @@ export const VideoClipNode = ({ id, data, selected }: any) => {
 export const MediaNode = ({ id, data, selected }: any) => {
   const { updateNodeData, getNodes, setNodes } = useReactFlow();
   const edges = useEdges();
+  const { enqueueTask } = useCanvasEngine();
   const nodes = useNodes();
   const [showConfig, setShowConfig] = useState(false);
   const [showHDSettings, setShowHDSettings] = useState(false);
@@ -1937,74 +2087,18 @@ export const MediaNode = ({ id, data, selected }: any) => {
     };
   }, [isAnnotating, brushColor, brushSize]);
 
-  const handleGenerate = async () => {
+  const handleGenerate = () => {
     if (data.isGenerating) return;
+
+    // ✨ 收集外部拉入或已连线的参考图 URLs
+    const imageRefs = incomingAssets
+      .filter((a: any) => a && (a.url || a.asset?.url))
+      .map((a: any) => a.url || a.asset?.url)
+      .filter(Boolean);
+
+    // ✨ 写入节点状态并加入到多路并发调度任务队列中
     updateNodeData(id, { incomingAssets: incomingAssets });
-    updateNodeData(id, { isGenerating: true });
-    try {
-      const targetModel = data.model || 'gpt-image-2';
-      const targetRatio = data.ratio || '16:9';
-      const quality = data.quality || '标准';
-      const isHD = quality === '高清 HD (耗时)';
-      const isUltra = quality === '极致 Ultra (4K)';
-
-      const baseSizeMap: Record<string, string> = {
-        '1:1': '1024x1024',
-        '16:9': '1024x576',
-        '9:16': '576x1024',
-        '4:3': '1024x768',
-        '3:4': '768x1024',
-      };
-      let targetSize = baseSizeMap[targetRatio] || '1024x1024';
-
-      if (targetModel.includes('seedream')) {
-        const srMap: Record<string, string> = {
-          '1:1': '1920x1920', '16:9': '2560x1440', '9:16': '1440x2560', '4:3': '2048x1536', '3:4': '1536x2048'
-        };
-        targetSize = srMap[targetRatio] || '2560x1440';
-      } else if (targetModel === 'gpt-image-2') {
-        const gptMap: Record<string, string> = {
-          '1:1': '1024x1024', '16:9': '1792x1024', '9:16': '1024x1792', '4:3': '1792x1024', '3:4': '1024x1792'
-        };
-        targetSize = gptMap[targetRatio] || '1024x1024';
-      } else {
-        if (isHD) {
-          const hdMap: Record<string, string> = {
-            '1:1': '2048x2048', '16:9': '1920x1080', '9:16': '1080x1920', '4:3': '2048x1536', '3:4': '1536x2048'
-          };
-          targetSize = hdMap[targetRatio] || '1920x1080';
-        } else if (isUltra) {
-          const ultraMap: Record<string, string> = {
-            '1:1': '4096x4096', '16:9': '3840x2160', '9:16': '2160x3840', '4:3': '4096x3072', '3:4': '3072x4096'
-          };
-          targetSize = ultraMap[targetRatio] || '3840x2160';
-        }
-      }
-
-      let finalPrompt = data.prompt || '生成绝美图像';
-      if (data.styleOverride && data.styleOverride !== '继承全局预设') {
-        finalPrompt = `${finalPrompt}, ${data.styleOverride}`;
-      }
-
-      const payload: any = {
-        model: targetModel,
-        prompt: finalPrompt,
-        ratio: targetRatio,
-        size: targetSize,
-        n: data.n || 1,
-      };
-      const imageRefs = incomingAssets.filter((a: any) => a._type === 'image').map((a: any) => a.url);
-      if (imageRefs.length > 0) { payload.image = imageRefs[0]; payload.images = imageRefs; }
-
-      const response = await fetchApi('/v1/images/generations', { method: 'POST', body: JSON.stringify(payload) });
-      const resData = await response.json();
-      const url = resData.data?.[0]?.url || resData.url;
-      if (url) updateNodeData(id, { isGenerating: false, resultUrl: url });
-      else throw new Error("API 未返回图片");
-    } catch (e) {
-      updateNodeData(id, { isGenerating: false }); 
-      useAppStore.getState().setToastMsg("生图被拦截或失败，请检查网络");
-    }
+    enqueueTask(id, 'image', getNodes, updateNodeData, imageRefs);
   };
 
   const showToast = (msg: string) => useAppStore.getState().setToastMsg(msg);
@@ -2172,28 +2266,21 @@ export const MediaNode = ({ id, data, selected }: any) => {
 
                 <input
                   type="file"
-                  id={`upload-video-${id}`}
+                  id={`upload-media-${id}`}
                   className="hidden"
-                  accept="video/*"
-                  onChange={(e) => {
+                  accept="image/*"
+                  onChange={async (e) => {
                     const file = e.target.files?.[0];
                     if (file) {
-      // 🚨 绝对禁止用 FileReader 读取视频！改用 createObjectURL
-                      const objectUrl = URL.createObjectURL(file);
-                      const vid = document.createElement('video');
-                      vid.src = objectUrl;
-                      vid.onloadedmetadata = () => {
-                        const w = vid.videoWidth;
-                        const h = vid.videoHeight;
-                        const ratioValue = w / h;
-                        let finalRatio = '16:9';
-                        if (ratioValue < 0.8) finalRatio = '9:16';
-                        else if (ratioValue >= 0.8 && ratioValue < 1.2) finalRatio = '1:1';
-                        else if (ratioValue >= 1.2 && ratioValue < 1.5) finalRatio = '4:3';
-        
-        // 瞬间完成预览，且几乎 0 内存占用
-                        updateNodeData(id, { videoUrl: objectUrl, ratio: finalRatio, prompt: file.name, isGenerating: false });
-                      };
+                      const compressedBase64 = await compressImage(file);
+                      const img = new Image(); 
+                      img.src = compressedBase64;
+                      img.onload = () => {
+                         const ratioValue = img.naturalWidth / img.naturalHeight;
+                         let finalRatio = '16:9';
+                         if (ratioValue < 0.8) finalRatio = '9:16'; else if (ratioValue >= 0.8 && ratioValue < 1.2) finalRatio = '1:1'; else if (ratioValue >= 1.2 && ratioValue < 1.5) finalRatio = '4:3';
+                         updateNodeData(id, { resultUrl: compressedBase64, ratio: finalRatio });
+                      }
                     }
                   }}
                  />
@@ -2205,7 +2292,7 @@ export const MediaNode = ({ id, data, selected }: any) => {
                  </div>
               ) : (
                  <div 
-                   onClick={() => document.getElementById(`upload-${id}`)?.click()}
+                   onClick={() => document.getElementById(`upload-media-${id}`)?.click()}
                    className="z-10 w-12 h-12 rounded-full bg-black/40 backdrop-blur-xl border border-white/10 flex items-center justify-center cursor-pointer shadow-[0_0_40px_rgba(76,29,149,0.3)] transition-all duration-500 hover:scale-110 hover:shadow-[0_0_60px_rgba(99,102,241,0.5),inset_0_0_20px_rgba(255,255,255,0.1)] hover:border-white/30 hover:bg-white/10 group/btn nodrag"
                  >
                     <Upload size={16} className="text-zinc-400 group-hover/btn:text-white transition-colors" />
@@ -2242,17 +2329,37 @@ export const MediaNode = ({ id, data, selected }: any) => {
               
               <div className="flex items-center justify-between px-2 pb-1 relative">
                  <div className="flex items-center gap-2">
-                    <CustomSelect className="w-[150px]" value={data.model || 'gpt-image-2'} options={[
-  { value: 'gpt-image-2', label: 'GPT-Image-2' },
-  { value: 'banana-pro', label: 'Banana Pro' },
-  { value: 'banana2', label: 'Banana 2' },
-  { value: 'seedream5.0', label: 'Seedream 5.0' }
-]} onChange={(v: string) => updateNodeData(id, { model: v })} />
+                    <CustomSelect 
+                      className="w-[150px]" 
+                      value={data.model || 'gpt-image-2'} 
+                      options={[
+                        { value: 'gpt-image-2', label: 'GPT-Image-2' },
+                        { value: 'banana-pro', label: 'Banana Pro' },
+                        { value: 'seedream5.0', label: 'Seedream 5.0' }
+                      ]} 
+                      onChange={(v: string) => {
+                        // ✨【防呆分辨率自动重置机制】
+                        // 自动核对新选模型是否兼容当前画质，如果不匹配，立即重设为对应模型的安全默认值
+                        let nextQuality = data.quality || '1K';
+                        if (v === 'seedream5.0') {
+                          if (!['2K', '3K'].includes(nextQuality)) {
+                            nextQuality = '2K';
+                          }
+                        } else if (v === 'banana-pro') {
+                          if (!['1K', '2K', '4K'].includes(nextQuality)) {
+                            nextQuality = '2K';
+                          }
+                        } else {
+                          nextQuality = '1K';
+                        }
+                        updateNodeData(id, { model: v, quality: nextQuality });
+                      }} 
+                    />
                     <CustomSelect className="w-[80px]" value={data.n || 1} options={[{ value: 1, label: '1 张' }, { value: 2, label: '2 张' }, { value: 3, label: '3 张' }, { value: 4, label: '4 张' }]} onChange={(v: number) => updateNodeData(id, { n: v })} />
                     
                     <div className="relative group/cfg">
                        <button onClick={() => setShowConfig(!showConfig)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] transition-all nodrag ${showConfig ? 'bg-indigo-500 text-white' : 'bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10'}`}>
-                           <span className="text-[10px] font-bold tracking-widest">{data.ratio || '16:9'} / {data.quality === '高清 HD (耗时)' ? '4K' : '2K'}</span>
+                           <span className="text-[10px] font-bold tracking-widest">{data.ratio || '16:9'} / {data.quality || '1K'}</span>
                            <Settings2 size={14}/>
                        </button>
                        {showConfig && (
@@ -2267,7 +2374,13 @@ export const MediaNode = ({ id, data, selected }: any) => {
                              </div>
                              <div className="flex flex-col gap-1 z-10">
                                 <label className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest">画质设定 (Quality)</label>
-                                <CustomSelect menuPosition="top" className="w-full bg-black/40 border border-white/5 text-zinc-300 rounded-[8px]" value={data.quality || '标准 Standard'} options={[{ value: '标准 Standard', label: '标准 Standard (2K内)' }, { value: '高清 HD (耗时)', label: '极致 Ultra (4K)' }]} onChange={(v: string) => updateNodeData(id, { quality: v })} />
+                                <CustomSelect 
+                                   menuPosition="top" 
+                                   className="w-full bg-black/40 border border-white/5 text-zinc-300 rounded-[8px]" 
+                                   value={data.quality || (data.model === 'seedream5.0' ? '2K' : '1K')} 
+                                   options={getImageQualityOptions(data.model || 'gpt-image-2')} 
+                                   onChange={(v: string) => updateNodeData(id, { quality: v })} 
+                                />
                              </div>
                              <div className="flex flex-col gap-1 z-20">
                                 <label className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest">风格强覆写 (Override)</label>
@@ -2858,6 +2971,28 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
     rowsToGen.forEach((r:any) => handleGenerateRow(r.id));
   };
 
+  // ✨ 导出为资产 JSON 压缩包
+  const handleExportTable = () => {
+    const exportData = {
+      yr_type: 'asset_table',
+      assetType: data.assetType,
+      model: data.model,
+      ratio: data.ratio,
+      quality: data.quality,
+      styleOverride: data.styleOverride,
+      rows: data.rows
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const typeName = data.assetType === 'scene' ? '场景表' : data.assetType === 'character' ? '角色表' : '道具表';
+    a.download = `YR_${typeName}_${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    useAppStore.getState().setToastMsg(`✅ ${typeName} 导出成功！`);
+  };
+
   // ✨ 提取独立节点到画布 (Bug修复版)
   const extractToCanvas = (row: any) => {
     const thisNode = getNodes().find(n => n.id === id);
@@ -2926,7 +3061,10 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
                <span className="text-[9px] text-zinc-500 font-mono tracking-wider mt-0.5">GENERATIVE ASSET MATRIX</span>
              </div>
           </div>
-          {/* ✨ 删除了这里无用的传承机位展示 */}
+          {/* ✨ 导出按钮 */}
+          <button onClick={handleExportTable} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] bg-white/5 hover:bg-white/10 border border-white/10 text-[10px] font-bold text-zinc-300 hover:text-white transition-all nodrag shadow-inner">
+             <Download size={12} /> 导出为表格文件
+          </button>
         </div>
 
         {/* ✨ 全局生成参数控制舱 */}
@@ -2991,45 +3129,38 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
                    <button onClick={()=>setZenMode({type: 'text', rowId: row.id, field: 'prompt', label: '编辑生图提示词'})} className="absolute top-2 right-2 p-1.5 bg-black/80 backdrop-blur-md rounded-lg opacity-0 group-hover/prompt:opacity-100 text-zinc-400 hover:text-white transition-all shadow-md"><Expand size={12}/></button>
                 </div>
 
-                {/* ✨ 核心：成图列 (自适应放大与生成控制) */}
-                <div className="w-[23%] relative bg-black/60 border border-white/5 rounded-[8px] flex flex-col items-center justify-center group/img overflow-hidden min-h-[100px]">
-                   {row.isGenerating ? (
-                      <div className="flex flex-col items-center gap-2 text-indigo-400">
-                        <Loader2 size={24} className="animate-spin" />
-                        <span className="text-[10px] font-mono tracking-widest animate-pulse">RENDERING...</span>
-                      </div>
-                   ) : row.resultUrl ? (
-                      <>
-                        <img src={row.resultUrl} className="w-full h-full object-cover cursor-pointer hover:scale-105 transition-transform duration-500" onClick={() => setZenMode({ type: 'image', url: row.resultUrl })}/>
-                        <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover/img:opacity-100 transition-opacity">
-                           <button onClick={() => extractToCanvas(row)} title="克隆到画布节点" className="p-1.5 bg-black/80 backdrop-blur-md rounded-[6px] text-white hover:bg-indigo-500 transition-colors"><Copy size={12}/></button>
-                           <button onClick={() => updateRow(row.id, 'resultUrl', null)} title="清除图片" className="p-1.5 bg-black/80 backdrop-blur-md rounded-[6px] text-white hover:bg-red-500 transition-colors"><Trash2 size={12}/></button>
-                        </div>
-                      </>
-                   ) : (
-                      <div className="flex gap-2">
-                        <button onClick={() => handleGenerateRow(row.id)} className="px-3 py-1.5 bg-white text-black hover:scale-105 rounded-[6px] text-[10px] font-bold flex items-center gap-1 shadow-[0_0_15px_rgba(255,255,255,0.2)] transition-all nodrag"><Wand2 size={12}/> 生成</button>
-                        <label className="px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-[6px] text-[10px] text-zinc-300 hover:text-white flex items-center gap-1 cursor-pointer transition-all nodrag">
-                           <Upload size={12}/> 上传
-                           <input type="file" id={`upload-${id}`} className="hidden" accept="image/*" onChange={async (e) => {
-                 const file = e.target.files?.[0];
-                 if(file) {
-                    // ✨ 核心修复：调用压缩滤网
-                    const compressedBase64 = await compressImage(file);
-                    const img = new Image(); 
-                    img.src = compressedBase64;
-                    img.onload = () => {
-                       const ratioValue = img.naturalWidth / img.naturalHeight;
-                       let finalRatio = '16:9';
-                       if (ratioValue < 0.8) finalRatio = '9:16'; else if (ratioValue >= 0.8 && ratioValue < 1.2) finalRatio = '1:1'; else if (ratioValue >= 1.2 && ratioValue < 1.5) finalRatio = '4:3';
-                       updateNodeData(id, { resultUrl: compressedBase64, ratio: finalRatio });
-                    }
-                 }
-              }} />
-                        </label>
-                      </div>
-                   )}
-                </div>
+                 {/* ✨ 核心：成图列 (自适应放大与生成控制) */}
+                 <div className="w-[23%] relative bg-black/60 border border-white/5 rounded-[8px] flex flex-col items-center justify-center group/img overflow-hidden min-h-[100px]">
+                    {row.isGenerating ? (
+                       <div className="flex flex-col items-center gap-2 text-indigo-400">
+                         <Loader2 size={24} className="animate-spin" />
+                         <span className="text-[10px] font-mono tracking-widest animate-pulse">RENDERING...</span>
+                       </div>
+                    ) : row.resultUrl ? (
+                       <>
+                         <img src={row.resultUrl} className="w-full h-full object-cover cursor-pointer hover:scale-105 transition-transform duration-500" onClick={() => setZenMode({ type: 'image', url: row.resultUrl })}/>
+                         <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover/img:opacity-100 transition-opacity">
+                            <button onClick={() => extractToCanvas(row)} title="克隆到画布节点" className="p-1.5 bg-black/80 backdrop-blur-md rounded-[6px] text-white hover:bg-indigo-500 transition-colors"><Copy size={12}/></button>
+                            <button onClick={() => updateRow(row.id, 'resultUrl', null)} title="清除图片" className="p-1.5 bg-black/80 backdrop-blur-md rounded-[6px] text-white hover:bg-red-500 transition-colors"><Trash2 size={12}/></button>
+                         </div>
+                       </>
+                    ) : (
+                       <div className="flex gap-2">
+                         <button onClick={() => handleGenerateRow(row.id)} className="px-3 py-1.5 bg-white text-black hover:scale-105 rounded-[6px] text-[10px] font-bold flex items-center gap-1 shadow-[0_0_15px_rgba(255,255,255,0.2)] transition-all nodrag"><Wand2 size={12}/> 生成</button>
+                         <label htmlFor={`upload-${row.id}`} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-[6px] text-[10px] text-zinc-300 hover:text-white flex items-center gap-1 cursor-pointer transition-all nodrag">
+                            <Upload size={12}/> 上传
+                            <input type="file" id={`upload-${row.id}`} className="hidden" accept="image/*" onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if(file) {
+                                   const compressedBase64 = await compressImage(file);
+                                   // 🚀 核心修复：把图片仅写给当前的 row，而不是给整个表格大节点！
+                                   updateRowMulti(row.id, { resultUrl: compressedBase64 });
+                                }
+                             }} />
+                         </label>
+                       </div>
+                    )}
+                 </div>
 
                 {/* 垃圾桶删除列 */}
                 <div className="w-[4%] flex items-center justify-center">
@@ -3046,3 +3177,32 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
     </div>
   );
 }; // 🚨 核心修复2：删掉多余的反大括号，正确闭合整个组件
+
+// ==========================================
+// 6. 文本备注节点 (TextNode) —— 创作者随笔与脚本草稿
+// ==========================================
+export const TextNode = ({ id, data, selected }: any) => {
+  const { updateNodeData } = useReactFlow();
+
+  return (
+    <div className="relative group z-20 w-[300px]">
+      <Handle type="target" position={Position.Left} id="left" className={handleLeft} />
+      <Handle type="source" position={Position.Right} id="right" className={handleRight} />
+
+      <div className={`${nodeBaseClass} ${selected ? selectedBorderClass : unselectedBorderClass} flex flex-col p-4`}>
+        <div className="flex items-center gap-2 mb-3 pb-2 border-b border-white/5">
+          <Type size={14} className="text-zinc-400" />
+          <span className="text-[12px] font-bold text-white tracking-widest">文本备注 (Note)</span>
+        </div>
+        
+        <textarea
+          value={data.text || ''}
+          onChange={(e) => updateNodeData(id, { text: e.target.value })}
+          placeholder="在此输入自定义备注或剧本草稿..."
+          className="w-full bg-black/40 border border-white/[0.05] rounded-[12px] p-3 text-[11px] text-zinc-300 outline-none resize-none min-h-[120px] focus:border-white/20 transition-all nodrag nopan"
+          onWheelCapture={(e) => e.stopPropagation()}
+        />
+      </div>
+    </div>
+  );
+};

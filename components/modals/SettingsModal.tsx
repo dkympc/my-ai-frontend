@@ -40,6 +40,29 @@ export default function SettingsModal({
   adminUsers, selectedUser, setSelectedUser,
   handleAdminUserAction, handleViewUserChats
 }: SettingsModalProps) {
+
+  // 👇==== 将充值函数移入组件内部，并修复类型和状态刷新 ====👇
+  const handleAdminRecharge = async (targetUsername: string) => {
+    if (!window.confirm(`确定要给用户 ${targetUsername} 充值 1000 万算力吗？`)) return;
+
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/v1/admin/users/${targetUsername}/recharge`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('yr-ai-token')}` }
+      });
+      if (res.ok) {
+        alert(`💰 成功给 ${targetUsername} 充值了 1000 万算力！`);
+        // 充值成功后，自动静默刷新大屏数据，让数字立刻变大！
+        fetchAdminData(false); 
+      } else {
+        alert("充值失败，请查看后端日志。");
+      }
+    } catch (e) {
+      alert("网络错误");
+    }
+  };
+  // 👆====================================================👆
+
   if (!isSettingsModalOpen) return null;
 
   return (
@@ -98,7 +121,6 @@ export default function SettingsModal({
             ======================= */}
         <div className="flex-1 p-8 lg:p-12 overflow-y-auto custom-scrollbar relative bg-transparent z-10">
           
-          {/* 精致关闭按钮 */}
           <button 
             onClick={() => setIsSettingsModalOpen(false)} 
             className="absolute top-8 right-8 p-3 text-zinc-500 hover:text-white bg-white/[0.02] border border-white/[0.05] rounded-full hover:bg-white/10 transition-all hover:scale-110"
@@ -106,7 +128,6 @@ export default function SettingsModal({
             <X size={16} />
           </button>
           
-          {/* 1. 通用设置 */}
           {activeSettingsTab === 'general' && (
             <div className="space-y-10 max-w-xl animate-in slide-in-from-bottom-4 fade-in duration-500">
               <div>
@@ -117,7 +138,6 @@ export default function SettingsModal({
               <div className="space-y-4">
                 <label className="text-[11px] font-medium text-zinc-500 tracking-wider uppercase">用户头像</label>
                 <div className="flex items-center gap-6">
-                  {/* 头像去除紫底，改为高级透明灰 */}
                   <div className="w-16 h-16 rounded-[20px] bg-white/[0.02] backdrop-blur-md flex items-center justify-center text-xl font-light text-zinc-300 overflow-hidden border border-white/[0.08] shadow-[0_10px_30px_rgba(0,0,0,0.5)]">
                     {settings.avatar.startsWith('data:image') ? <img src={settings.avatar} className="w-full h-full object-cover" /> : settings.avatar || 'YR'}
                   </div>
@@ -129,7 +149,6 @@ export default function SettingsModal({
                 </div>
               </div>
 
-              {/* 输入框黑洞化 */}
               <div className="space-y-3">
                 <label className="text-[11px] font-medium text-zinc-500 tracking-wider uppercase">用户昵称</label>
                 <input 
@@ -150,7 +169,6 @@ export default function SettingsModal({
             </div>
           )}
 
-          {/* 2. 个性化指令 */}
           {activeSettingsTab === 'instructions' && (
             <div className="space-y-10 max-w-2xl animate-in slide-in-from-bottom-4 fade-in duration-500">
               <div>
@@ -190,7 +208,6 @@ export default function SettingsModal({
             </div>
           )}
 
-          {/* 3. 模型微调 */}
           {activeSettingsTab === 'parameters' && (
             <div className="space-y-12 max-w-xl animate-in slide-in-from-bottom-4 fade-in duration-500">
               <div>
@@ -198,7 +215,6 @@ export default function SettingsModal({
                 <p className="text-[13px] text-zinc-500 font-light">通过核心参数调整底层大模型的输出倾向与风格。</p>
               </div>
 
-              {/* 滑块改成黑白极简风格 */}
               <div className="space-y-5">
                 <div className="flex justify-between items-end">
                   <div>
@@ -242,7 +258,6 @@ export default function SettingsModal({
             </div>
           )}
 
-          {/* 4. 数据与存储 (取消亮蓝色，全部黑白化) */}
           {activeSettingsTab === 'data' && (
             <div className="space-y-8 max-w-xl animate-in slide-in-from-bottom-4 fade-in duration-500">
               <div>
@@ -270,7 +285,6 @@ export default function SettingsModal({
             </div>
           )}
 
-          {/* 5. 管理员控制台 (科幻大屏级重构) */}
           {activeSettingsTab === 'admin' && userRole === 'admin' && (
             <div className="space-y-8 max-w-5xl w-full pb-10 animate-in slide-in-from-bottom-4 fade-in duration-500">
               <div className="flex justify-between items-end border-b border-white/[0.05] pb-6">
@@ -278,7 +292,7 @@ export default function SettingsModal({
                   <h2 className="text-[28px] font-bold tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-white to-zinc-400 flex items-center gap-3">
                     <Shield className="text-zinc-300" size={24} /> Admin 大屏
                   </h2>
-                  <p className="text-[13px] text-zinc-500 font-light mt-2">实时监控全站算力流转与节点在线状态 (Auto-Sync 3s)</p>
+                  <p className="text-[13px] text-zinc-500 font-light mt-2">实时监控全站算力流转与节点在线状态</p>
                 </div>
                 <div className="flex items-center gap-4">
                   <div className="flex items-center gap-2 px-4 py-2 bg-white/[0.02] border border-white/[0.05] rounded-full text-[11px] text-zinc-400 shadow-inner">
@@ -345,7 +359,6 @@ export default function SettingsModal({
                 </div>
               )}
 
-              {/* 🚨 用户详情配置侧边弹窗 (也完全玻璃化) */}
               {selectedUser && (
                 <div className="fixed inset-0 z-[100000] flex items-center justify-center p-4">
                   <div className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300" onClick={() => setSelectedUser(null)} />
@@ -385,7 +398,6 @@ export default function SettingsModal({
                         ].map(perm => (
                           <div key={perm.key} className="flex flex-col gap-3 p-4 bg-black/40 border border-white/[0.08] rounded-[20px]">
                             <span className="text-[11px] text-zinc-400 flex items-center gap-2 font-medium tracking-wide">{perm.icon} {perm.label}</span>
-                            {/* Toggle Switch 黑白极简改造 */}
                             <button 
                               onClick={() => handleAdminUserAction(selectedUser.username, 'update_permission', { perm_type: perm.key, perm_value: !selectedUser[perm.key] })}
                               className={`w-10 h-6 rounded-full relative transition-colors duration-300 ${selectedUser[perm.key] ? 'bg-white' : 'bg-white/10'}`}
@@ -398,10 +410,14 @@ export default function SettingsModal({
                     </div>
 
                     <div className="flex flex-col gap-3">
-                      {/* 充值按钮改为纯白高亮 */}
-                      <button onClick={() => handleAdminUserAction(selectedUser.username, 'recharge')} className="w-full py-3.5 bg-white text-black hover:scale-[1.02] rounded-[16px] text-[13px] font-bold transition-all shadow-[0_0_20px_rgba(255,255,255,0.3)]">
-                        注入 100,000 算力
+                      {/* 👇 这里完美替换为了 selectedUser.username，并且我帮你优化了极简白UI！ */}
+                      <button 
+                        onClick={() => handleAdminRecharge(selectedUser.username)} 
+                        className="w-full py-3.5 bg-white text-black hover:bg-zinc-200 rounded-[16px] text-[13px] font-bold shadow-[0_0_20px_rgba(255,255,255,0.2)] transition-all flex items-center justify-center gap-2"
+                      >
+                        💰 强制注资 1000 万
                       </button>
+
                       <div className="flex gap-3">
                         <button onClick={() => handleAdminUserAction(selectedUser.username, 'reset_tokens')} className="flex-1 py-3 bg-white/[0.02] border border-white/[0.08] hover:bg-white/[0.05] text-zinc-300 rounded-[16px] text-[12px] font-medium transition-all">
                           清零消耗

@@ -27,9 +27,8 @@ export const MODELS = [
 
 export const IMAGE_MODELS = [
   { id: 'gpt-image-2', name: 'GPT-Image-2', desc: '官方稳定生图', features: ['ratio', 'style'] },
-  { id: 'banana2', name: 'Banana 2', desc: '极速生成引擎', features: ['ratio', 'negative', 'style'] },
-  { id: 'banana-pro', name: 'Banana Pro', desc: '专业级细节把控', features: ['ratio', 'stylize', 'negative'] },
-  { id: 'seedream5.0', name: 'Seedream 5.0', desc: '极致梦幻艺术', features: ['ratio', 'style', 'negative', 'sampler'] }
+  { id: 'banana-pro', name: 'Banana Pro (gemini-3-pro)', desc: '专业级 4K 像素与文字渲染', features: ['ratio', 'stylize', 'negative'] },
+  { id: 'seedream5.0', name: 'Seedream 5.0 (2K/3K)', desc: '极致梦幻梦境艺术', features: ['ratio', 'style', 'negative', 'sampler'] }
 ];
 
 export const VIDEO_MODES = [

@@ -274,9 +274,15 @@ export default function ChatPage() {
           avatar: dbSettings.avatar || currentUsername.charAt(0).toUpperCase()
         }));
         setTimeout(() => setHasLoadedFromServer(true), 500);
+      } else if (res.status === 401) {
+        // ✨ 新增：如果后端返回 401（Token过期或被踢下线），强制清空并弹回登录页
+        localStorage.removeItem('yr-ai-token');
+        localStorage.removeItem('yr-ai-role');
+        window.location.reload();
       }
     } catch (e) { console.error("同步云端数据失败", e); } 
   };
+
   useEffect(() => {
     if (textareaRef.current && activeView === 'chat') {
       textareaRef.current.style.height = 'auto';
@@ -378,7 +384,7 @@ export default function ChatPage() {
     let intervalId: NodeJS.Timeout;
     if (isSettingsModalOpen && activeSettingsTab === 'admin' && userRole === 'admin') {
       fetchAdminData(false); 
-      intervalId = setInterval(() => { fetchAdminData(true); }, 3000);
+      intervalId = setInterval(() => { fetchAdminData(true); }, 30000);
     }
     return () => { if (intervalId) clearInterval(intervalId); };
   }, [activeSettingsTab, userRole, isSettingsModalOpen]);

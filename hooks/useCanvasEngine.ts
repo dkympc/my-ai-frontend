@@ -3,7 +3,9 @@ import { fetchApi } from '@/services/api';
 import { useAppStore } from '@/store/useAppStore';
 
 // ✨ 全局交通管制中心（内存单例）
-const taskQueue: Array<{ nodeId: string, type: 'image' | 'video', getNodes: any, updateNodeData: any, extraImageRefs?: string[] }> = [];
+// i2iOptions：去脏重绘专用参数 { baseImage: 底图URL, targetNodeId: 结果写入的新节点ID, prompt: 重绘提示词 }
+type I2iOptions = { baseImage: string; targetNodeId: string; prompt: string };
+const taskQueue: Array<{ nodeId: string, type: 'image' | 'video' | 'i2i', getNodes: any, updateNodeData: any, extraImageRefs?: string[], i2iOptions?: I2iOptions }> = [];
 const activeTasks = new Set<string>();
 const MAX_CONCURRENCY = 2; // 最大并发数：2，防止 API 封号
 
@@ -24,6 +26,9 @@ export function useCanvasEngine() {
         await executeImageTask(task.nodeId, task.getNodes, task.updateNodeData, task.extraImageRefs);
       } else if (task.type === 'video') {
         await executeVideoTask(task.nodeId, task.getNodes, task.updateNodeData);
+      } else if (task.type === 'i2i') {
+        // ✨ 去脏重绘：结果写入右侧新 MediaNode，不覆盖源节点
+        await executeI2iTask(task.nodeId, task.getNodes, task.updateNodeData, task.i2iOptions!);
       }
     } finally {
       // 无论成功失败，释放当前车道，并递归叫号下一个
@@ -33,11 +38,17 @@ export function useCanvasEngine() {
   };
 
   // 🚀 对外暴露的入队方法
-  const enqueueTask = (nodeId: string, type: 'image' | 'video', getNodes: any, updateNodeData: any, extraImageRefs?: string[]) => {
-    // 标记节点进入“排队”状态
-    updateNodeData(nodeId, { status: 'pending', isGenerating: true });
-    taskQueue.push({ nodeId, type, getNodes, updateNodeData, extraImageRefs });
-    useAppStore.getState().setToastMsg(`🚦 节点已加入${type === 'image' ? '生图' : '渲染'}队列 (排队中: ${taskQueue.length})`);
+  // 对于 i2i 去脏重绘：不标记源节点为 generating（源节点不变），结果会写入 targetNodeId 指定的新节点
+  const enqueueTask = (nodeId: string, type: 'image' | 'video' | 'i2i', getNodes: any, updateNodeData: any, extraImageRefs?: string[], i2iOptions?: I2iOptions) => {
+    if (type !== 'i2i') {
+      // 普通生图/视频：标记本节点进入"排队"状态
+      updateNodeData(nodeId, { status: 'pending', isGenerating: true });
+    } else if (i2iOptions) {
+      // 去脏重绘：标记右侧新结果节点为排队中
+      updateNodeData(i2iOptions.targetNodeId, { status: 'pending', isGenerating: true });
+    }
+    taskQueue.push({ nodeId, type, getNodes, updateNodeData, extraImageRefs, i2iOptions });
+    useAppStore.getState().setToastMsg(`🚦 节点已加入${type === 'image' ? '生图' : type === 'video' ? '渲染' : '去脏重绘'}队列 (排队中: ${taskQueue.length})`);
     
     // 呼叫交通灯检查是否可以放行
     processQueue();
@@ -67,34 +78,113 @@ export function useCanvasEngine() {
         finalStyle = ', Cyberpunk style, neon lights, futuristic city, highly detailed';
       }
 
-    // 2. 提示词拼装（强制用户 basePrompt 放在最前面，获得最高权重）
+    // 3. 模型与画质转换 (翻译给后端)
+    const targetModel = data.model || settings?.defaultImageModel || 'gpt-image-2';
+    
+    // ✨【画画分辨率精细化定义】
+    // 支持 1K, 2K, 3K, 4K 的精准物理对齐
+    const quality = data.quality || '1K';
+    
+    // ✨ 核心机制：比例优先级。单分镜节点 ratio 拥有最高优先级，其次为全局穿透的 globalRatioOverride，最后默认 16:9
+    const ratio = data.ratio || data.globalRatioOverride || '16:9';
+
+    // 4. 不同模型参数与比例尺寸的适配性拼装
+    let targetSize = '1024x1024';
+    let gptRatioPrefix = '';
+    let extraParams: any = {};
+
+    if (targetModel === 'gpt-image-2') {
+      // 🚨 gpt-image-2: size 等参数字段不生效且易报 400，最终尺寸纯靠 Prompt 比例控制
+      // 方案：生成最高权重的前缀，强制塞进 Prompt 的最开头
+      const gptPrefixMap: Record<string, string> = {
+        '1:1': '1024x1024 方形, ',
+        '16:9': '横版 16:9 电影画幅, ',
+        '9:16': '竖版 9:16 手机壁纸, ',
+        '4:3': '横版 4:3, ',
+        '3:4': '竖版 3:4, ',
+        '21:9': '横版 21:9 电影宽幅, '
+      };
+      gptRatioPrefix = gptPrefixMap[ratio] || '横版 16:9 电影画幅, ';
+      
+      // GPT 模型不发送 size, aspect_ratio 以防校验 400 报错
+      targetSize = 'auto'; // 后端会做兜底过滤，确保不触发上游限制
+    } 
+    else if (targetModel === 'banana-pro') {
+      // 🚨 Banana Pro: 宽高比与像素值有极其精准、强硬的官方映射，若不符会直接报 400!
+      // 划分：1K (标准), 2K (高清), 4K (极致) 三档
+      let resolutionGrade = '1K'; // 默认 1K
+      if (quality.includes('2K') || quality.includes('高清') || quality.includes('HD')) {
+        resolutionGrade = '2K';
+      } else if (quality.includes('4K') || quality.includes('极致') || quality.includes('Ultra')) {
+        resolutionGrade = '4K';
+      }
+
+      // 10 种宽高比与 1K/2K/4K 像素的官方矩阵映射
+      const googleGrid: Record<string, Record<string, string>> = {
+        '1:1': { '1K': '1024x1024', '2K': '2048x2048', '4K': '4096x4096' },
+        '2:3': { '1K': '848x1264',  '2K': '1696x2528', '4K': '3392x5056' },
+        '3:2': { '1K': '1264x848',  '2K': '2528x1696', '4K': '5056x3392' },
+        '3:4': { '1K': '896x1200',  '2K': '1792x2400', '4K': '3584x4800' },
+        '4:3': { '1K': '1200x896',  '2K': '2400x1792', '4K': '4800x3584' },
+        '4:5': { '1K': '928x1152',  '2K': '1856x2304', '4K': '3712x4608' },
+        '5:4': { '1K': '1152x928',  '2K': '2304x1856', '4K': '4608x3712' },
+        '9:16': { '1K': '768x1376',  '2K': '1536x2752', '4K': '3072x5504' },
+        '16:9': { '1K': '1376x768',  '2K': '2752x1536', '4K': '5504x3072' },
+        '21:9': { '1K': '1584x672',  '2K': '3168x1344', '4K': '6336x2688' },
+      };
+
+      const ratioGrid = googleGrid[ratio] || googleGrid['16:9'];
+      targetSize = ratioGrid[resolutionGrade] || ratioGrid['1K'];
+      
+      // 传递比例控制变量，后端会平铺在 payload 顶层
+      extraParams = {
+        "aspect_ratio": ratio,
+        "aspectRatio": ratio
+      };
+    }
+    else if (targetModel === 'seedream5.0') {
+      // 🚨 Seedream 5.0: 官方仅支持 2K/3K 分辨率档位，其余（如1K/4K）在5.0下调用会直接报 400 失败
+      let seedreamGrade = '2K'; // 默认 2K 保证高成功率
+      if (quality.includes('3K') || quality.includes('超高清') || quality.includes('极致')) {
+        seedreamGrade = '3K';
+      }
+
+      // 如果是 1:1，可以使用预设黄金字符串 "2K" 或 "3K"；如果是其他非 1:1 比例，按规范传入精确像素 WxH
+      if (ratio === '1:1') {
+        targetSize = seedreamGrade;
+      } else {
+        const seedreamGrid: Record<string, Record<string, string>> = {
+          '16:9': { '2K': '2560x1440', '3K': '3072x1728' },
+          '9:16': { '2K': '1440x2560', '3K': '1728x3072' },
+          '4:3':  { '2K': '2048x1536', '3K': '3072x2304' },
+          '3:4':  { '2K': '1536x2048', '3K': '2304x3072' },
+          '21:9': { '2K': '2880x1224', '3K': '3072x1312' }
+        };
+        const ratioGrid = seedreamGrid[ratio] || seedreamGrid['16:9'];
+        targetSize = ratioGrid[seedreamGrade] || ratioGrid['2K'];
+      }
+
+      extraParams = {
+        "output_format": "png", // 5.0 模型专享无损高质量格式
+        "watermark": false     // 强制商用去水印
+      };
+    }
+    else {
+      // 其他模型兜底
+      if (quality.includes('HD') || quality.includes('4K') || quality.includes('极致') || quality.includes('高清')) {
+        const hdMap: Record<string, string> = { '1:1': '2048x2048', '16:9': '1920x1080', '9:16': '1080x1920', '4:3': '2048x1536', '3:4': '1536x2048' };
+        targetSize = hdMap[ratio] || '1920x1080';
+      } else {
+        const defaultMap: Record<string, string> = { '1:1': '1024x1024', '16:9': '1024x576', '9:16': '576x1024', '4:3': '1024x768', '3:4': '768x1024' };
+        targetSize = defaultMap[ratio] || '1024x576';
+      }
+    }
+
+    // 2. 提示词拼装（强制将 ratioPrefix 放于最开头，获得大模型的极高遵循度）
     const basePrompt = data.firstFrameAnchor || data.prompt || '';
     const lighting = data.sceneLighting ? `, ${data.sceneLighting}` : '';
     const camera = data.globalCamera ? `, ${data.globalCamera}` : '';
-    const finalPrompt = `${basePrompt}${lighting}${camera}${finalStyle}`;
-
-    // 3. 模型与画质转换 (翻译给后端)
-    const targetModel = data.model || settings?.defaultImageModel || 'gpt-image-2';
-    const isHD = data.quality === '高清 HD (耗时)'; // UI 中的画质选项
-
-    let targetSize = '1024x1024';
-    if (targetModel.includes('seedream')) {
-      const srMap: Record<string, string> = { '1:1': '1920x1920', '16:9': '2560x1440', '9:16': '1440x2560', '4:3': '2048x1536', '3:4': '1536x2048' };
-      targetSize = srMap[data.ratio || '16:9'] || '2560x1440';
-    } else if (targetModel === 'gpt-image-2') {
-      // 🚨 核心修复：GPT-Image-2 必须使用原生尺寸，否则上游 API 会强行添加白边补成正方形
-      const gptMap: Record<string, string> = { '1:1': '1024x1024', '16:9': '1792x1024', '9:16': '1024x1792', '4:3': '1792x1024', '3:4': '1024x1792' };
-      targetSize = gptMap[data.ratio || '16:9'] || '1024x1024';
-    } else {
-      // Banana / 其他模型
-      if (isHD) {
-        const hdMap: Record<string, string> = { '1:1': '2048x2048', '16:9': '1920x1080', '9:16': '1080x1920', '4:3': '2048x1536', '3:4': '1536x2048' };
-        targetSize = hdMap[data.ratio || '16:9'] || '1920x1080';
-      } else {
-        const defaultMap: Record<string, string> = { '1:1': '1024x1024', '16:9': '1024x576', '9:16': '576x1024', '4:3': '1024x768', '3:4': '768x1024' };
-        targetSize = defaultMap[data.ratio || '16:9'] || '1024x576';
-      }
-    }
+    const finalPrompt = `${gptRatioPrefix}${basePrompt}${lighting}${camera}${finalStyle}`;
 
     // ==========================================
     // 🆕 收集从上游节点传过来的参考图
@@ -108,16 +198,17 @@ export function useCanvasEngine() {
     return { 
       model: targetModel, 
       prompt: finalPrompt, 
-      ratio: data.ratio || '16:9', 
+      ratio: ratio, 
       size: targetSize,
       n: data.n || 1,
+      ...extraParams,
       ...(refImages.length > 0 ? { image: refImages[0], images: refImages } : {})
     };
   };
 
   const buildVideoPayload = (data: any, settings: any) => {
     // 1. 视频专属提示词拼装
-    const finalVideoPrompt = `【摄影与光影限制】\n机位：${data.globalCamera || '无'}\n光线：${data.sceneLighting || '无'}\n\n【主体动作】\n${data.prompt || ''}`;
+    const finalVideoPrompt = `【摄影与光影限制】\n机位：${data.globalCamera || '无'}\n光线：${data.sceneLighting || '无'}\n\n【主体动作】\n${data.prompt || data.videoPrompt || ''}`;
     const targetModel = data.model || settings?.defaultVideoModel || 'doubao-seedance-2-0-260128';
     
     // 2. 渲染精度转换
@@ -125,14 +216,17 @@ export function useCanvasEngine() {
     if (data.resolution === '1080P') resolutionParam = '1080p';
 
     // ✨ 核心红线拦截：检查 prompt 中是否显式输入了 [@参考 ]，防强买强卖
-    const hasAssetMention = data.prompt?.includes('[@参考') || false;
+    const hasAssetMention = (data.prompt || data.videoPrompt)?.includes('[@参考') || false;
+
+    // ✨ 核心机制：比例优先级。单分镜节点 ratio 拥有最高优先级，其次为全局穿透的 globalRatioOverride，最后默认 16:9
+    const activeVideoRatio = data.ratio || data.globalRatioOverride || '16:9';
 
     const payload: any = { 
       model: targetModel, 
       // 只有既有图，且用户显式 @ 了，才走 i2v，否则一律 t2v
       mode: (data.frameUrl && hasAssetMention) ? 'i2v' : 't2v', 
       prompt: finalVideoPrompt, 
-      ratio: data.ratio || '16:9',
+      ratio: activeVideoRatio,
       duration: data.duration || 5,
       resolution: resolutionParam
     };
@@ -161,7 +255,16 @@ export function useCanvasEngine() {
       });
       
       const resData = await response.json();
-      const url = resData.data?.[0]?.url;
+      
+      // 🚀 核心修复：全能解析器，完美兼容各大模型的返回格式
+      let url = null;
+      if (resData.data && resData.data.length > 0 && resData.data[0].url) url = resData.data[0].url;
+      else if (resData.url) url = resData.url;
+      else if (resData.images && resData.images.length > 0) url = resData.images[0].url || resData.images[0];
+      else if (resData.choices && resData.choices.length > 0 && resData.choices[0].message?.content) { 
+        const match = resData.choices[0].message.content.match(/!\[.*?\]\((.*?)\)/); 
+        if (match && match[1]) url = match[1]; 
+      }
       
       if (url) {
         updateNodeData(nodeId, { status: 'done', isGenerating: false, frameUrl: url, resultUrl: url });
@@ -176,7 +279,7 @@ export function useCanvasEngine() {
   };
 
   // ==========================================
-  // 执行器：生视频逻辑 (防烧钱 Mock 模式)
+  // 执行器：生视频 logic
   // ==========================================
   const executeVideoTask = async (nodeId: string, getNodes: any, updateNodeData: any) => {
     const node = getNodes().find((n: any) => n.id === nodeId);
@@ -199,6 +302,64 @@ export function useCanvasEngine() {
         resolve();
       }, 5000);
     });
+  };
+
+  // ==========================================
+  // ✨ 执行器：去脏重绘 i2i 逻辑（第一阶段新增）
+  // 设计逻辑：读取源节点的模型/比例/光影，用传入的重绘 prompt 覆盖首帧描述，
+  // 把底图作为参考图发起图生图请求，结果写入右侧新 MediaNode（绝不覆盖源节点）。
+  // 后端 i2i 链路已具备：gpt-image-2 走 /v1/images/edits，banana2 走 Gemini generateContent，
+  // 其他模型走通用 images 字段，模型由用户在节点上自选，这里不做限制。
+  // ==========================================
+  const executeI2iTask = async (nodeId: string, getNodes: any, updateNodeData: any, options: I2iOptions) => {
+    const { baseImage, targetNodeId, prompt } = options;
+    const node = getNodes().find((n: any) => n.id === nodeId);
+    if (!node) {
+      console.error("[Canvas i2i Error] - 原因是：找不到源节点", nodeId);
+      return;
+    }
+
+    // 标记右侧新结果节点为生成中
+    updateNodeData(targetNodeId, { status: 'generating', isGenerating: true });
+
+    // 复用 buildImagePayload，但用重绘 prompt 覆盖首帧描述，并把底图作为参考图传入
+    const payload = buildImagePayload(
+      { ...node.data, firstFrameAnchor: prompt, prompt },
+      useAppStore.getState().canvasSettings,
+      [baseImage]
+    );
+
+    console.log("【中间件输出】i2i 去脏重绘 Payload:", payload);
+
+    try {
+      const response = await fetchApi('/v1/images/generations', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+
+      const resData = await response.json();
+
+      // 🚀 复用全能解析器，完美兼容各大模型的返回格式
+      let url = null;
+      if (resData.data && resData.data.length > 0 && resData.data[0].url) url = resData.data[0].url;
+      else if (resData.url) url = resData.url;
+      else if (resData.images && resData.images.length > 0) url = resData.images[0].url || resData.images[0];
+      else if (resData.choices && resData.choices.length > 0 && resData.choices[0].message?.content) {
+        const match = resData.choices[0].message.content.match(/!\[.*?\]\((.*?)\)/);
+        if (match && match[1]) url = match[1];
+      }
+
+      if (url) {
+        // 结果写入右侧新 MediaNode，源节点保持不变
+        updateNodeData(targetNodeId, { status: 'done', isGenerating: false, resultUrl: url, frameUrl: url });
+      } else {
+        throw new Error("API 未返回图片 URL");
+      }
+    } catch (error: any) {
+      console.error("[Canvas i2i Error] - 原因是：", error?.message || error);
+      updateNodeData(targetNodeId, { status: 'failed', isGenerating: false });
+      useAppStore.getState().setToastMsg("🪄 去脏重绘失败，请查看控制台 [Canvas i2i Error] 日志");
+    }
   };
 
   return { enqueueTask };

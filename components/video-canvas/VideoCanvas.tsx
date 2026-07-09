@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom'; // ✨ 新增：用于将总控抽屉传送到 HTML 根节点顶层渲染
 import { 
     ReactFlow, 
     Background, 
@@ -23,7 +24,7 @@ import {
 import '@xyflow/react/dist/style.css'; 
 
 // 🚀 唯一引用的 lucide-react，完美避开所有重名报错
-import { ArrowLeft, Plus, Type, Image as ImageIconIcon, Film, ZoomIn, ZoomOut, Maximize, Clapperboard, Layers, Check, Settings, X, Loader2 } from 'lucide-react';
+import { ArrowLeft, Plus, Type, Image as ImageIconIcon, Film, ZoomIn, ZoomOut, Maximize, Clapperboard, Layers, Check, Settings, X, Loader2, RotateCcw, Sliders } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import AssetDock from './AssetDock'; 
 import { ImageRecord, VideoRecord } from '@/lib/types'; 
@@ -86,7 +87,7 @@ function ZoomPanel() {
 }
 
 function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
-  const { activeCanvasProjectId, setActiveCanvasProjectId, canvasProjects, updateCanvasProject, canvasSettings, setCanvasSettings } = useAppStore();
+  const { activeCanvasProjectId, setActiveCanvasProjectId, canvasProjects, updateCanvasProject, canvasSettings, setCanvasSettings, isFilmControlOpen, setIsFilmControlOpen } = useAppStore();
   const currentProject = (canvasProjects || []).find((p: any) => p.id === activeCanvasProjectId);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(currentProject?.nodes || []);
@@ -104,14 +105,20 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
     }
   }, [currentProject, setNodes, setEdges]);
 
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, getNodes, getEdges } = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement>(null);
   
   // ✨ 修改 menuPos 支持记录“来源节点”，用来自动连线
   const [menuPos, setMenuPos] = useState<{ x: number, y: number, screenX: number, screenY: number, sourceNodeId?: string } | null>(null);
   
-  // ✨ 拦截用户的“拖拽连线”动作
+  // ✨ 新增：拦截用户的“拖拽连线”动作
   const [connecting, setConnecting] = useState<{ nodeId: string | null } | null>(null);
+
+  // 👇👇👇 新增下面这一行 👇👇👇
+  // ✨ 新增：画布“时光机”快照，专门用于抢救误删的节点与连线
+  const [deleteHistory, setDeleteHistory] = useState<{nodes: any[], edges: any[]}[]>([]);
+  const [deletedNodes, setDeletedNodes] = useState<any[]>([]); // ✨ 新增：时空回收站软删除备份栈
+  const [isRecyclerOpen, setIsRecyclerOpen] = useState(false); // ✨ 新增：时空回收站展开状态
 
   // ✨ 全局状态锁
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving'>('saved');
@@ -151,6 +158,89 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
     return () => window.removeEventListener('wheel', preventBrowserZoom, { capture: true });
   }, []);
 
+  // ✨【中控容灾】自定义节点变更拦截器 (拦截误删 + 时空软删除)
+  const customOnNodesChange = useCallback((changes: any[]) => {
+    const removeChanges = changes.filter(c => c.type === 'remove');
+    if (removeChanges.length > 0) {
+      // 1. 第一道防线：拦截核心主中控和资产表，触发防误删锁
+      const hasCriticalNode = removeChanges.some(change => {
+        const nodeToDelete = nodes.find(n => n.id === change.id);
+        return nodeToDelete && (nodeToDelete.type === 'masterScript' || nodeToDelete.type === 'assetTable');
+      });
+      
+      if (hasCriticalNode) {
+        const confirmDelete = window.confirm("⚠️ 主中控/资产表为分镜核心，您确定要删除吗?");
+        if (!confirmDelete) {
+          // 用户点取消，坚决截断删除操作，完美保护画布底座
+          return;
+        }
+      }
+      
+      // 2. 第二道防线：将删除的节点与其前置/后置物理连线，完好保存进时空回收站
+      const newDeletedRecords: any[] = [];
+      removeChanges.forEach(change => {
+        const nodeToDelete = nodes.find(n => n.id === change.id);
+        if (nodeToDelete) {
+          // 精准过滤并保存连接线
+          const connectedEdges = edges.filter(e => e.source === nodeToDelete.id || e.target === nodeToDelete.id);
+          newDeletedRecords.push({
+            id: nodeToDelete.id,
+            node: nodeToDelete,
+            edges: connectedEdges,
+            deletedAt: Date.now()
+          });
+        }
+      });
+      
+      if (newDeletedRecords.length > 0) {
+        setDeletedNodes(prev => [...newDeletedRecords, ...prev]); // 灌入时空回收站头部
+        setDeleteHistory(prev => [...prev, { nodes, edges }]);   // 拍下案发现场给 Ctrl+Z 备份
+      }
+    }
+    
+    // 放行正常节点动作
+    onNodesChange(changes);
+  }, [nodes, edges, onNodesChange]);
+
+  // ✨【中控容灾】从时空裂隙中完美恢复节点与其物理连线和各种状态
+  const handleRestoreNode = useCallback((recordId: string) => {
+    const record = deletedNodes.find(r => r.id === recordId);
+    if (!record) return;
+    
+    // 1. 将节点放回 nodes (防止因某种情况发生重复添加)
+    setNodes(nds => {
+      if (nds.some(n => n.id === record.node.id)) return nds;
+      return [...nds, record.node];
+    });
+    
+    // 2. 将连线放回 edges (只要连线的另一端在画布中，就原汁原味重连)
+    setEdges(eds => {
+      const restoredEdges = record.edges.filter(edge => {
+        const sourceExists = getNodes().some(n => n.id === edge.source) || edge.source === record.node.id;
+        const targetExists = getNodes().some(n => n.id === edge.target) || edge.target === record.node.id;
+        return sourceExists && targetExists && !eds.some(e => e.id === edge.id);
+      });
+      return [...eds, ...restoredEdges];
+    });
+    
+    // 3. 从时空碎片列表清除
+    setDeletedNodes(prev => prev.filter(r => r.id !== recordId));
+    
+    const nodeTypeLabel = 
+      record.node.type === 'masterScript' ? '主剧本中控台' :
+      record.node.type === 'assetTable' ? '数据资产表' :
+      record.node.type === 'shot' ? `🎬 分镜 ${record.node.data?.shotNumber || ''}` : '卡片节点';
+    
+    useAppStore.getState().setToastMsg(`✅ 【${nodeTypeLabel}】已从时空裂隙中完美复活！`);
+  }, [deletedNodes, setNodes, setEdges, getNodes]);
+
+  // ✨【中控容灾】清空时空碎片
+  const handleClearRecycler = useCallback(() => {
+    setDeletedNodes([]);
+    setIsRecyclerOpen(false);
+    useAppStore.getState().setToastMsg("🧹 时空裂隙已彻底净化清空。");
+  }, []);
+
   // ✨ 实时监测变动并触发自动保存 (加入防抖与初次挂载拦截)
   const isFirstRender = useRef(true);
   useEffect(() => {
@@ -174,12 +264,11 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
 
     // ✨ 新增：节点剪贴板状态
     const [clipboard, setClipboard] = useState<{nodes: any[], edges: any[]} | null>(null);
-    const { getNodes, getEdges } = useReactFlow();
   
-    // ✨ 新增：监听全局 Ctrl+C / Ctrl+V
+    // ✨ 新增：监听全局 Ctrl+C / Ctrl+V 以及 Ctrl+Z (误删撤销)
     useEffect(() => {
       const handleKeyDown = (e: KeyboardEvent) => {
-        // 保护机制：如果焦点在输入框里，不要触发画布的复制粘贴
+        // 保护机制：如果焦点在输入框里，不要触发画布的快捷键，保留浏览器打字默认逻辑
         if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
   
         const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
@@ -229,11 +318,33 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
            setEdges(eds => eds.map(e => ({...e, selected: false})).concat(newEdges));
            useAppStore.getState().setToastMsg(`成功粘贴并克隆 ${newNodes.length} 个节点及内部逻辑`);
         }
+
+        // =====================================
+        // 👇👇👇 这是为你全新加进去的 Ctrl+Z 撤销防误删逻辑
+        // =====================================
+        if (isCmdOrCtrl && e.key.toLowerCase() === 'z') {
+           e.preventDefault(); // 🛑 核心护盾：坚决拦截浏览器的默认撤销，防止它把你旁边文本框的剧本清空！
+           
+           if (deleteHistory.length > 0) {
+               // 1. 取出最后一张快照
+               const lastSnapshot = deleteHistory[deleteHistory.length - 1]; 
+               // 2. 瞬间恢复卡片和连线
+               setNodes(lastSnapshot.nodes); 
+               setEdges(lastSnapshot.edges); 
+               // 3. 撕掉用过的快照
+               setDeleteHistory(prev => prev.slice(0, -1)); 
+               useAppStore.getState().setToastMsg("↩️ 撤销成功，误删节点已复活！");
+           } else {
+               useAppStore.getState().setToastMsg("当前没有可撤销的误删操作");
+           }
+        }
+
       };
   
       document.addEventListener('keydown', handleKeyDown);
       return () => document.removeEventListener('keydown', handleKeyDown);
-    }, [clipboard, getNodes, getEdges, setNodes, setEdges]);
+      
+    }, [clipboard, getNodes, getEdges, setNodes, setEdges, deleteHistory]);
 
     useEffect(() => {
       setEdges((eds) => {
@@ -346,27 +457,8 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
            setNodes((nds) => [...nds, newNode]);
         };
 
-        const handleLoad = () => {
-           const w = isVideo ? (media as HTMLVideoElement).videoWidth : (media as HTMLImageElement).naturalWidth;
-           const h = isVideo ? (media as HTMLVideoElement).videoHeight : (media as HTMLImageElement).naturalHeight;
-           const ratioValue = w / h;
-           
-           let finalRatio = '16:9';
-           if (ratioValue < 0.8) finalRatio = '9:16';
-           else if (ratioValue >= 0.8 && ratioValue < 1.2) finalRatio = '1:1';
-           else if (ratioValue >= 1.2 && ratioValue < 1.5) finalRatio = '4:3';
-           
-           createNodeWithRatio(finalRatio);
-        };
-
-        // 兜底防错：如果媒体加载失败（比如跨域），直接按 16:9 生成，防止拖进来没反应
-        media.onerror = () => createNodeWithRatio('16:9');
-        
-        if (isVideo) { 
-           media.onloadedmetadata = handleLoad; 
-        } else { 
-           media.onload = handleLoad; 
-        }
+        // 🚀 核心优化：瞬间生成节点，不再等待网络下载媒体！拖拉极其丝滑！
+        createNodeWithRatio(asset.ratio || '16:9');
         return;
       } catch (e) {}
     }
@@ -376,7 +468,52 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
       const file = event.dataTransfer.files[0];
       const isVideo = file.type.startsWith('video');
       const isImage = file.type.startsWith('image');
+      const isJson = file.type === 'application/json' || file.name.endsWith('.json');
       
+      // ✨ 拦截处理资产 JSON 文件的导入
+      if (isJson) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            const parsed = JSON.parse(e.target?.result as string);
+            if (parsed.yr_type === 'asset_table') {
+              const newNodeId = `asset_table_imported_${Date.now()}`;
+              const newNode = {
+                id: newNodeId, type: 'assetTable', position,
+                data: {
+                  assetType: parsed.assetType || 'scene', model: parsed.model || 'gpt-image-2',
+                  ratio: parsed.ratio || '16:9', quality: parsed.quality || '标准 Standard',
+                  styleOverride: parsed.styleOverride || '继承全局预设', rows: parsed.rows || []
+                }
+              };
+              
+              setNodes((nds) => [...nds, newNode]);
+              
+              // 自动去寻找画布上的主剧本节点并建立连接
+              setTimeout(() => {
+                 const currentNodes = getNodes();
+                 const masterScriptNode = currentNodes.find(n => n.type === 'masterScript');
+                 if (masterScriptNode) {
+                    setEdges((eds) => addEdge({
+                      id: `e-${masterScriptNode.id}-${newNodeId}`, source: masterScriptNode.id, target: newNodeId, sourceHandle: 'right', targetHandle: 'left',
+                      type: 'default', animated: true, style: { stroke: 'rgba(217, 70, 239, 0.8)', strokeWidth: 2, strokeDasharray: '8 8', animationDuration: '3s' }
+                    }, eds));
+                 }
+              }, 100);
+
+              const typeName = parsed.assetType === 'scene' ? '场景表' : parsed.assetType === 'character' ? '角色表' : '道具表';
+              useAppStore.getState().setToastMsg(`✅ 成功导入最新的 ${typeName}，并在裂变时优先使用！`);
+            } else {
+              useAppStore.getState().setToastMsg("⚠️ 无法识别的 JSON 格式，请拖入系统导出的表格包");
+            }
+          } catch (err) {
+            useAppStore.getState().setToastMsg("⚠️ JSON 文件解析失败");
+          }
+        };
+        reader.readAsText(file);
+        return;
+      }
+
       if (isVideo || isImage) {
         const processMedia = (fileUrl: string) => {
             const media = isVideo ? document.createElement('video') : new Image();
@@ -481,8 +618,19 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
     setMenuPos(null);
   };
 
-  // ✨ React Flow 连线拦截器
-  const onConnectStart = useCallback((event: any, params: any) => { 
+  // 👇👇👇 新增下面这两个函数 👇👇👇
+  // ✨ 新增：在节点或连线被删除的瞬间，拍下案发现场快照，存入时光机
+  const onNodesDelete = useCallback(() => {
+    setDeleteHistory(prev => [...prev, { nodes, edges }]);
+  }, [nodes, edges]);
+
+  const onEdgesDelete = useCallback(() => {
+    setDeleteHistory(prev => [...prev, { nodes, edges }]);
+  }, [nodes, edges]);
+  // 👆👆👆 ------------------- 👆👆👆
+
+  // ✨ React Flow 连线拦截器 (这是原有的代码)
+  const onConnectStart = useCallback((event: any, params: any) => {
     setConnecting({ nodeId: params.nodeId }); 
   }, []);
   
@@ -521,6 +669,158 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
       onDrop={onDrop} 
       onClick={handleCanvasClick}
     >
+      {/* ========================================== */}
+      {/* 🎬 黑色液态玻璃影视总控抽屉 (Film Control Center) */}
+      {/* ========================================== */}
+      {typeof window !== 'undefined' && createPortal(
+        <div 
+          className={`fixed top-24 left-6 bottom-24 w-[360px] z-[999999] rounded-[32px] bg-[#050507]/90 backdrop-blur-3xl border border-white/[0.08] shadow-[0_30px_100px_rgba(0,0,0,0.95),inset_0_1px_1px_rgba(255,255,255,0.08)] flex flex-col overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+            isFilmControlOpen ? 'opacity-100 translate-x-0 pointer-events-auto' : 'opacity-0 -translate-x-12 pointer-events-none'
+          }`}
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="px-6 py-5 border-b border-white/[0.05] flex items-center justify-between bg-white/[0.01]">
+            <span className="text-[12px] font-extrabold text-zinc-200 tracking-[0.2em] flex items-center gap-2 uppercase">
+              <Sliders size={14} className="text-zinc-400 animate-pulse" />
+              影视级中控台 (Film Control)
+            </span>
+            <button 
+              onClick={() => setIsFilmControlOpen(false)} 
+              className="w-6 h-6 rounded-full flex items-center justify-center bg-white/5 hover:bg-white/10 text-zinc-500 hover:text-white transition-all border border-white/5"
+            >
+              <X size={12} />
+            </button>
+          </div>
+
+          <div className="flex-1 p-6 overflow-y-auto custom-scrollbar flex flex-col gap-6">
+            {/* 1. 比例一键穿透 */}
+            <div className="flex flex-col gap-3">
+              <label className="text-[10px] font-extrabold text-zinc-500 uppercase tracking-widest pl-1">
+                影视分镜比例 (Global Ratio)
+              </label>
+              <div className="grid grid-cols-5 gap-1.5 bg-black/40 p-1.5 rounded-[16px] border border-white/5 shadow-inner">
+                {['16:9', '9:16', '1:1', '4:3', '3:4'].map(r => (
+                  <button 
+                    key={r} 
+                    onClick={() => setCanvasSettings({ ...canvasSettings, globalRatio: r })} 
+                    className={`py-2 text-[11px] font-mono rounded-[10px] transition-all border ${
+                      canvasSettings?.globalRatio === r 
+                        ? 'bg-white text-black border-white shadow-[0_5px_15px_rgba(255,255,255,0.15)] font-bold' 
+                        : 'text-zinc-500 hover:text-white hover:bg-white/5 border-transparent'
+                    }`}
+                  >
+                    {r}
+                  </button>
+                ))}
+              </div>
+              
+              <button
+                onClick={() => {
+                  // 🚀 比例穿透：将 globalRatio 穿透到所有 ShotNode 的 globalRatioOverride 字段
+                  const currentRatio = canvasSettings?.globalRatio || '16:9';
+                  setNodes(nds => nds.map(node => {
+                    if (node.type === 'shot') {
+                      return {
+                        ...node,
+                        data: {
+                          ...node.data,
+                          globalRatioOverride: currentRatio
+                        }
+                      };
+                    }
+                    return node;
+                  }));
+                  useAppStore.getState().setToastMsg(`⚡ 已将全局比例 [${currentRatio}] 一键穿透覆盖到所有分镜！`);
+                }}
+                className="w-full py-3 rounded-[16px] border border-white/10 bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white text-[12px] font-bold tracking-widest transition-all active:scale-[0.98] shadow-md flex items-center justify-center gap-2"
+              >
+                <span>⚡ 全局比例穿透覆盖</span>
+              </button>
+            </div>
+
+            <div className="w-full h-px bg-white/[0.05]" />
+
+            {/* 2. 后缀智能追加 */}
+            <div className="flex flex-col gap-3">
+              <label className="text-[10px] font-extrabold text-zinc-500 uppercase tracking-widest pl-1">
+                全局提示词后缀 (Prompt Suffix)
+              </label>
+              <textarea
+                className="w-full bg-black/40 border border-white/5 focus:border-indigo-500/50 hover:bg-white/[0.01] rounded-[16px] p-3 text-[12px] text-zinc-300 outline-none w-full font-mono transition-colors nodrag nopan resize-none custom-scrollbar min-h-[90px] shadow-inner"
+                placeholder="例如：Cinematic, highly detailed, masterpieces, 35mm film still look..."
+                value={canvasSettings?.globalPromptSuffix || ''}
+                onChange={(e) => setCanvasSettings({ ...canvasSettings, globalPromptSuffix: e.target.value })}
+                onWheelCapture={(e) => { if (!e.ctrlKey && !e.metaKey) e.stopPropagation(); }}
+              />
+
+              <button
+                onClick={() => {
+                  const currentSuffix = canvasSettings?.globalPromptSuffix || '';
+                  
+                  setNodes(nds => nds.map(node => {
+                    if (node.type === 'shot') {
+                      // 1. 恢复原始纯净的 firstFrameAnchor 和 videoPrompt 状态
+                      // 如果存在 originalFirstFrameAnchor，使用原始数据，否则初始化它
+                      const originalFirst = node.data.originalFirstFrameAnchor !== undefined 
+                        ? node.data.originalFirstFrameAnchor 
+                        : (node.data.firstFrameAnchor || '');
+                      const originalVideo = node.data.originalVideoPrompt !== undefined 
+                        ? node.data.originalVideoPrompt 
+                        : (node.data.videoPrompt || '');
+
+                      // 2. 清洗上一次被追加的后缀 (防止套娃堆叠)
+                      const lastApplied = node.data.lastAppliedSuffix || '';
+
+                      let cleanFirst = originalFirst;
+                      let cleanVideo = originalVideo;
+
+                      if (lastApplied && lastApplied.trim()) {
+                        // 严格在句尾剔除上一次追加的内容
+                        const suffixPattern = new RegExp(`\\n?,\\s*${lastApplied.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}$`);
+                        cleanFirst = cleanFirst.replace(suffixPattern, '').trim();
+                        cleanVideo = cleanVideo.replace(suffixPattern, '').trim();
+                      }
+
+                      // 3. 追加新的全局后缀 (如果存在的话)
+                      let newFirst = cleanFirst;
+                      let newVideo = cleanVideo;
+
+                      if (currentSuffix.trim()) {
+                        newFirst = `${cleanFirst}\n, ${currentSuffix}`;
+                        newVideo = `${cleanVideo}\n, ${currentSuffix}`;
+                      }
+
+                      return {
+                        ...node,
+                        data: {
+                          ...node.data,
+                          // 首次追加时，备份原始 Prompt，以便未来清洗时使用
+                          originalFirstFrameAnchor: originalFirst,
+                          originalVideoPrompt: originalVideo,
+                          firstFrameAnchor: newFirst,
+                          videoPrompt: newVideo,
+                          lastAppliedSuffix: currentSuffix
+                        }
+                      };
+                    }
+                    return node;
+                  }));
+
+                  if (currentSuffix.trim()) {
+                    useAppStore.getState().setToastMsg(`✨ 智能全局后缀已成功追加（已去重、防套娃污染）`);
+                  } else {
+                    useAppStore.getState().setToastMsg(`🧹 已安全清除所有分镜的全局提示词后缀`);
+                  }
+                }}
+                className="w-full py-3 rounded-[16px] bg-indigo-500 hover:bg-indigo-400 text-white text-[12px] font-bold tracking-widest transition-all active:scale-[0.98] shadow-[0_10px_25px_rgba(99,102,241,0.3)] flex items-center justify-center gap-2"
+              >
+                <span>✨ 智能追加至所有分镜</span>
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
       {ripples.map(r => (
         <div
           key={r.id}
@@ -547,9 +847,12 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
       `}}/>
 
 <ReactFlow
-  nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} 
-  onConnectStart={onConnectStart} onConnectEnd={onConnectEnd} 
-  nodeTypes={nodeTypes} edgeTypes={edgeTypes} onPaneDoubleClick={onPaneDoubleClick} onPaneContextMenu={onPaneContextMenu} onPaneClick={() => setMenuPos(null)}
+        nodes={nodes} edges={edges} onNodesChange={customOnNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} 
+        
+        onNodesDelete={onNodesDelete} onEdgesDelete={onEdgesDelete} 
+        
+        onConnectStart={onConnectStart} onConnectEnd={onConnectEnd} 
+        nodeTypes={nodeTypes} edgeTypes={edgeTypes} onPaneDoubleClick={onPaneDoubleClick} onPaneContextMenu={onPaneContextMenu} onPaneClick={() => setMenuPos(null)}
   zoomOnDoubleClick={false} minZoom={0.05} maxZoom={15} proOptions={{ hideAttribution: true }} 
   connectionRadius={80}
   selectionKeyCode={['Control', 'Meta']} 
@@ -584,6 +887,19 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
           <ArrowLeft size={18} />
         </button>
         
+        {/* ✨ 新增：中控台一键开关 Pill 按钮 */}
+        <button 
+          onClick={() => setIsFilmControlOpen(!isFilmControlOpen)}
+          className={`h-10 px-4 rounded-full backdrop-blur-3xl border flex items-center gap-2 text-[12px] font-bold tracking-widest transition-all duration-300 shadow-[0_10px_30px_rgba(0,0,0,0.8)] hover:scale-105 ${
+            isFilmControlOpen 
+              ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-300' 
+              : 'bg-black/60 border-white/[0.08] text-zinc-400 hover:text-white hover:border-white/20'
+          }`}
+        >
+          <Sliders size={14} className={isFilmControlOpen ? 'text-indigo-400 animate-spin-slow' : 'text-zinc-500'} />
+          影视总控
+        </button>
+
         <div className="h-10 px-4 rounded-full bg-black/60 backdrop-blur-3xl border border-white/[0.08] shadow-[0_10px_30px_rgba(0,0,0,0.8)] flex items-center gap-3 group hover:border-white/20 transition-all duration-300">
           <input
             type="text"
@@ -717,6 +1033,93 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
            </div>
         </div>
       )}
+
+      {/* ✨ 右下角：时空回收站 (Space Recycler) 悬浮舱 */}
+      <div className="absolute bottom-24 right-6 z-50 flex flex-col items-end gap-3">
+        {/* 回收站展开面板 */}
+        {isRecyclerOpen && (
+          <div className="w-[280px] max-h-[360px] flex flex-col bg-[#050507]/90 backdrop-blur-3xl border border-white/[0.08] rounded-[24px] shadow-[0_30px_80px_rgba(0,0,0,0.95),inset_0_1px_1px_rgba(255,255,255,0.08)] overflow-hidden animate-in fade-in slide-in-from-bottom-5 duration-300" onClick={e => e.stopPropagation()}>
+            {/* 面板顶栏 */}
+            <div className="px-4 py-3 border-b border-white/[0.05] flex items-center justify-between bg-white/[0.01]">
+              <span className="text-[10px] font-extrabold text-zinc-300 tracking-[0.2em] flex items-center gap-1.5 uppercase">
+                <RotateCcw size={12} className="text-zinc-400" />
+                时空回收站 ({deletedNodes.length})
+              </span>
+              <button onClick={() => setIsRecyclerOpen(false)} className="text-zinc-500 hover:text-white transition-colors">
+                <X size={14} />
+              </button>
+            </div>
+            
+            {/* 面板内容列表 */}
+            <div className="flex-1 p-3 overflow-y-auto custom-scrollbar flex flex-col gap-2 min-h-[120px]">
+              {deletedNodes.length === 0 ? (
+                <div className="flex-1 flex flex-col items-center justify-center py-10 text-zinc-600 text-[11px] font-light">
+                  <RotateCcw size={20} className="mb-2 text-zinc-700 opacity-50" />
+                  时空裂隙中暂无残留碎片
+                </div>
+              ) : (
+                deletedNodes.map((record) => {
+                  const nodeTypeLabel = 
+                    record.node.type === 'masterScript' ? '📝 中控台' :
+                    record.node.type === 'assetTable' ? '📊 资产表' :
+                    record.node.type === 'shot' ? `🎬 分镜 ${record.node.data?.shotNumber || ''}` :
+                    record.node.type === 'media' ? '🖼️ 图像' :
+                    record.node.type === 'render' ? '🎞️ 视频' : '📦 节点';
+                  
+                  return (
+                    <div key={record.id} className="flex items-center justify-between p-2.5 rounded-[12px] bg-black/40 border border-white/[0.03] hover:border-white/[0.1] transition-all group/item shadow-inner">
+                      <div className="flex flex-col gap-0.5 overflow-hidden pr-2">
+                        <span className="text-[11px] font-bold text-zinc-200 truncate">{nodeTypeLabel}</span>
+                        <span className="text-[9px] text-zinc-600 font-mono">
+                          {new Date(record.deletedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                        </span>
+                      </div>
+                      
+                      <button 
+                        onClick={() => handleRestoreNode(record.id)}
+                        className="px-2.5 py-1.5 rounded-[8px] border border-white/[0.05] bg-white/[0.02] hover:bg-white/[0.1] text-zinc-300 hover:text-white text-[10px] font-bold tracking-widest transition-all active:scale-95 shrink-0 nodrag"
+                      >
+                        还原
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            
+            {/* 清空回收站按钮 */}
+            {deletedNodes.length > 0 && (
+              <div className="p-2 border-t border-white/[0.05] bg-white/[0.01]">
+                <button 
+                  onClick={handleClearRecycler}
+                  className="w-full py-1.5 rounded-[10px] hover:bg-red-500/10 hover:text-red-400 text-zinc-500 text-[10px] font-medium tracking-widest transition-all nodrag"
+                >
+                  清空全部时空碎片
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 悬浮圆形气泡按钮 */}
+        <button 
+          onClick={() => setIsRecyclerOpen(!isRecyclerOpen)}
+          className={`w-10 h-10 rounded-full backdrop-blur-3xl border shadow-[0_10px_30px_rgba(0,0,0,0.8)] flex items-center justify-center transition-all duration-300 relative group/btn hover:scale-105 active:scale-95 ${
+            isRecyclerOpen 
+              ? 'bg-white/20 border-white/30 text-white' 
+              : 'bg-black/60 border-white/[0.08] text-zinc-400 hover:text-white hover:border-white/20'
+          }`}
+          onClickCapture={e => e.stopPropagation()}
+        >
+          <RotateCcw size={16} className={`transition-transform duration-500 ${isRecyclerOpen ? 'rotate-180' : 'group-hover/btn:rotate-45'}`} />
+          {/* 未读数字标记 */}
+          {deletedNodes.length > 0 && (
+            <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-white text-black font-mono text-[9px] font-extrabold flex items-center justify-center shadow-[0_0_8px_rgba(255,255,255,0.8)] animate-bounce">
+              {deletedNodes.length}
+            </span>
+          )}
+        </button>
+      </div>
 
       {/* 双击/右键菜单 */}
       {menuPos && (
