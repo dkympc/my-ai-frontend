@@ -1,7 +1,6 @@
 // store/useAppStore.ts
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware'; // ✨ 引入持久化魔法
-
 interface AppSettings {
   nickname: string;
   avatar: string;
@@ -14,7 +13,7 @@ interface AppSettings {
 
 interface AppState {
   canvasProjects?: any[]; 
-  updateCanvasProject?: (id: string, data: any) => void; 
+  updateCanvasProject?: (id: string, data: any | ((prev: any) => any)) => void; 
     // ✨ 新增画布全局设置
   canvasSettings: { defaultImageModel: string; defaultVideoModel: string; globalPromptSuffix: string; globalRatio: string; directorGenre: string; directorTempo: string; };
   setCanvasSettings: (updater: any) => void;
@@ -49,10 +48,12 @@ export const useAppStore = create<AppState>()(
       canvasProjects: [], 
       updateCanvasProject: (id, data) => set((state: any) => {
         const exists = (state.canvasProjects || []).find((p:any) => p.id === id);
+        // ★ 支持函数式更新：调用方可传 function(prev) 读取原子快照，消除竞态条件
+        const mergeData = typeof data === 'function' ? data(exists) : data;
         if (exists) {
-          return { canvasProjects: state.canvasProjects.map((p: any) => p.id === id ? { ...p, ...data, updatedAt: Date.now() } : p) };
+          return { canvasProjects: state.canvasProjects.map((p: any) => p.id === id ? { ...p, ...mergeData, updatedAt: Date.now() } : p) };
         } else {
-          return { canvasProjects: [...(state.canvasProjects || []), { id, ...data, updatedAt: Date.now() }] };
+          return { canvasProjects: [...(state.canvasProjects || []), { id, ...mergeData, updatedAt: Date.now() }] };
         }
       }),
       activeCanvasProjectId: null,
@@ -78,6 +79,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'yr-canvas-storage',
+      storage: createJSONStorage(() => sessionStorage), // ★ 改用 sessionStorage：自动按浏览器会话隔离，杜绝跨账号数据污染
       // ✨ 核心修复：把页面路由状态和画布ID一起加入缓存白名单！
       partialize: (state) => ({
         // 只保留项目的基本信息（避免撑爆 localStorage）

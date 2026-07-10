@@ -1225,14 +1225,13 @@ export const ShotNode = ({ id, data, selected }: any) => {
   };
 
   const handleSaveAsset = (category: string) => {
-    const { activeCanvasProjectId, canvasProjects, updateCanvasProject } = useAppStore.getState();
-    const currentProject = canvasProjects?.find((p: any) => p.id === activeCanvasProjectId);
+    const { activeCanvasProjectId, updateCanvasProject } = useAppStore.getState();
     const url = data.frameUrl || data.resultUrl || data.asset?.url;
     if (!url) {
       useAppStore.getState().setToastMsg("⚠️ 当前节点没有可保存的图片！");
       return;
     }
-    if (!currentProject) {
+    if (!activeCanvasProjectId) {
       useAppStore.getState().setToastMsg("⚠️ 请先进入一个画布项目！");
       return;
     }
@@ -1245,7 +1244,8 @@ export const ShotNode = ({ id, data, selected }: any) => {
       ratio: data.ratio || '16:9',
       category,
     };
-    updateCanvasProject(activeCanvasProjectId, { localAssets: [asset, ...(currentProject.localAssets || [])] });
+    // ★ 函数式更新：从状态机原子快照读取最新 localAssets，杜绝竞态覆盖
+    updateCanvasProject(activeCanvasProjectId, (prev: any) => ({ localAssets: [asset, ...(prev?.localAssets || [])] }));
     useAppStore.getState().setToastMsg(`✅ 已存入 [${category === 'scene' ? '场景' : category === 'character' ? '人物' : '道具'}] 分类`);
   };
 
@@ -1682,19 +1682,18 @@ export const VideoClipNode = ({ id, data, selected }: any) => {
 
     // ✨ 新增：视频存资产函数
     const handleSaveAsset = () => {
-      const { activeCanvasProjectId, canvasProjects, updateCanvasProject } = useAppStore.getState();
-      const currentProject = canvasProjects?.find((p:any) => p.id === activeCanvasProjectId);
-      if (currentProject && typeof updateCanvasProject === 'function') {
-         const url = data.videoUrl || data.resultUrl || data.asset?.url;
-         if (!url) return;
-         const asset = {
-           id: `local_${Date.now()}`, _type: 'video', url,
-           prompt: data.prompt || data.videoPrompt || '已保存的视频',
-           timestamp: Date.now(), ratio: data.ratio || '16:9'
-         };
-         updateCanvasProject(activeCanvasProjectId, { localAssets: [asset, ...(currentProject.localAssets || [])] });
-         useAppStore.getState().setToastMsg(`✅ 视频已存入侧边栏资产库！`);
-      }
+      const { activeCanvasProjectId, updateCanvasProject } = useAppStore.getState();
+      if (!activeCanvasProjectId || typeof updateCanvasProject !== 'function') return;
+      const url = data.videoUrl || data.resultUrl || data.asset?.url;
+      if (!url) return;
+      const asset = {
+        id: `local_${Date.now()}`, _type: 'video', url,
+        prompt: data.prompt || data.videoPrompt || '已保存的视频',
+        timestamp: Date.now(), ratio: data.ratio || '16:9'
+      };
+      // ★ 函数式更新：从状态机原子快照读取最新 localAssets，杜绝竞态覆盖
+      updateCanvasProject(activeCanvasProjectId, (prev: any) => ({ localAssets: [asset, ...(prev?.localAssets || [])] }));
+      useAppStore.getState().setToastMsg(`✅ 视频已存入侧边栏资产库！`);
     };
 
   return (
@@ -2153,14 +2152,13 @@ export const MediaNode = ({ id, data, selected }: any) => {
   };
 
   const handleSaveAsset = (category: string) => {
-    const { activeCanvasProjectId, canvasProjects, updateCanvasProject } = useAppStore.getState();
-    const currentProject = canvasProjects?.find((p: any) => p.id === activeCanvasProjectId);
+    const { activeCanvasProjectId, updateCanvasProject } = useAppStore.getState();
     const url = data.frameUrl || data.resultUrl || data.asset?.url;
     if (!url) {
       useAppStore.getState().setToastMsg("⚠️ 当前节点没有可保存的图片！");
       return;
     }
-    if (!currentProject) {
+    if (!activeCanvasProjectId) {
       useAppStore.getState().setToastMsg("⚠️ 请先进入一个画布项目！");
       return;
     }
@@ -2173,7 +2171,8 @@ export const MediaNode = ({ id, data, selected }: any) => {
       ratio: data.ratio || '16:9',
       category,
     };
-    updateCanvasProject(activeCanvasProjectId, { localAssets: [asset, ...(currentProject.localAssets || [])] });
+    // ★ 函数式更新：从状态机原子快照读取最新 localAssets，杜绝竞态覆盖
+    updateCanvasProject(activeCanvasProjectId, (prev: any) => ({ localAssets: [asset, ...(prev?.localAssets || [])] }));
     useAppStore.getState().setToastMsg(`✅ 已存入 [${category === 'scene' ? '场景' : category === 'character' ? '人物' : '道具'}] 分类`);
   };
 
@@ -2504,19 +2503,18 @@ export const RenderNode = ({ id, data, selected }: any) => {
   const showToast = (msg: string) => useAppStore.getState().setToastMsg(msg);
     // ✨ 新增：视频存资产函数
     const handleSaveAsset = () => {
-      const { activeCanvasProjectId, canvasProjects, updateCanvasProject } = useAppStore.getState();
-      const currentProject = canvasProjects?.find((p:any) => p.id === activeCanvasProjectId);
-      if (currentProject && typeof updateCanvasProject === 'function') {
-         const url = displayVideo;
-         if (!url) return;
-         const asset = {
-           id: `local_${Date.now()}`, _type: 'video', url,
-           prompt: data.prompt || '已保存的视频',
-           timestamp: Date.now(), ratio: data.ratio || '16:9'
-         };
-         updateCanvasProject(activeCanvasProjectId, { localAssets: [asset, ...(currentProject.localAssets || [])] });
-         useAppStore.getState().setToastMsg(`✅ 视频已存入侧边栏资产库！`);
-      }
+      const { activeCanvasProjectId, updateCanvasProject } = useAppStore.getState();
+      if (!activeCanvasProjectId || typeof updateCanvasProject !== 'function') return;
+      const url = displayVideo;
+      if (!url) return;
+      const asset = {
+        id: `local_${Date.now()}`, _type: 'video', url,
+        prompt: data.prompt || '已保存的视频',
+        timestamp: Date.now(), ratio: data.ratio || '16:9'
+      };
+      // ★ 函数式更新：从状态机原子快照读取最新 localAssets，杜绝竞态覆盖
+      updateCanvasProject(activeCanvasProjectId, (prev: any) => ({ localAssets: [asset, ...(prev?.localAssets || [])] }));
+      useAppStore.getState().setToastMsg(`✅ 视频已存入侧边栏资产库！`);
     };
   
   const handleDownload = (e: React.MouseEvent) => {
@@ -2886,13 +2884,12 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
 
   // ✨ 将生成的图片存档到右侧资产库
   const saveToAssets = (url: string, promptText: string) => {
-    const { activeCanvasProjectId, canvasProjects, updateCanvasProject } = useAppStore.getState();
-    const currentProject = canvasProjects?.find((p:any) => p.id === activeCanvasProjectId);
-    if (currentProject && typeof updateCanvasProject === 'function') {
-       const asset = { id: `local_${Date.now()}`, _type: 'image', url, prompt: promptText, timestamp: Date.now(), ratio: data.ratio || '16:9' };
-       updateCanvasProject(activeCanvasProjectId, { localAssets: [asset, ...(currentProject.localAssets || [])] });
-       useAppStore.getState().setToastMsg("✅ 已自动存入右侧资产库！");
-    }
+    const { activeCanvasProjectId, updateCanvasProject } = useAppStore.getState();
+    if (!activeCanvasProjectId || typeof updateCanvasProject !== 'function') return;
+    const asset = { id: `local_${Date.now()}`, _type: 'image', url, prompt: promptText, timestamp: Date.now(), ratio: data.ratio || '16:9' };
+    // ★ 函数式更新：从状态机原子快照读取最新 localAssets，杜绝竞态覆盖
+    updateCanvasProject(activeCanvasProjectId, (prev: any) => ({ localAssets: [asset, ...(prev?.localAssets || [])] }));
+    useAppStore.getState().setToastMsg("✅ 已自动存入右侧资产库！");
   };
 
   // ✨ 核心修复：使用 setNodes 进行安全的函数式更新，彻底解决异步状态互相覆盖导致图片丢失的问题

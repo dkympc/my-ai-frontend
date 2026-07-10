@@ -332,7 +332,11 @@ export default function ChatPage() {
         localStorage.removeItem('yr-ai-role');
         window.location.reload();
       }
-    } catch (e) { console.error("同步云端数据失败", e); } 
+    } catch (e) {
+      console.error("[Canvas Sync Error] 云端数据加载失败，回退到本地缓存：", e);
+      setToastMsg("云端数据加载失败，使用本地缓存");
+      setHasLoadedFromServer(true); // ★ 网络故障时允许画布继续使用本地缓存工作
+    } 
   };
 
   useEffect(() => {
@@ -375,7 +379,10 @@ export default function ChatPage() {
   // 🚀 拯救性能大动脉：采用“打字时防抖”策略
   const latestPayloadRef = useRef("");
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
-  
+  // ★ 画布数据实时引用，绕过防抖延迟，确保 sendBeacon 发送最新数据
+  const canvasProjectsRef = useRef(canvasProjects);
+  useEffect(() => { canvasProjectsRef.current = canvasProjects; }, [canvasProjects]);
+   
 
   useEffect(() => { 
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
@@ -389,7 +396,7 @@ export default function ChatPage() {
         settings,
         canvasProjects: canvasProjects
       }); 
-    }, 1000); 
+    }, 300); 
     
     return () => { if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current); }
   }, [sessions, imageHistory, videoHistory, wfSessions, settings, canvasProjects]);
@@ -402,7 +409,15 @@ export default function ChatPage() {
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (isAuthenticated && hasLoadedFromServer) {
-        const payload = latestPayloadRef.current;
+        let payload = latestPayloadRef.current;
+        // ★ 将最新画布数据注入 payload（绕过 300ms 防抖延迟，确保关页前最后一刻的修改也同步）
+        if (payload && canvasProjectsRef.current) {
+          try {
+            const parsed = JSON.parse(payload);
+            parsed.canvasProjects = canvasProjectsRef.current;
+            payload = JSON.stringify(parsed);
+          } catch(e) { console.error("[Sync] 合并画布数据失败", e); }
+        }
         const url = `${API_BASE}/v1/user/sync_sessions`;
         const blob = new Blob([payload], { type: 'application/json' });
         if (!navigator.sendBeacon(url, blob)) {
@@ -489,7 +504,23 @@ export default function ChatPage() {
     const confirmed = await showConfirm("退出登录", "确定要退出登录吗？");
     if (confirmed) {
       try { await fetch(`${API_BASE}/v1/logout`, { method: 'POST', headers: { 'Authorization': `Bearer ${localStorage.getItem('yr-ai-token')}` } }); } catch(e) {}
-      localStorage.removeItem('yr-ai-token'); localStorage.removeItem('yr-ai-role'); setIsAuthenticated(false); setUserRole('user'); window.location.reload();
+      // ★ 清除认证凭证
+      localStorage.removeItem('yr-ai-token');
+      localStorage.removeItem('yr-ai-role');
+      // ★ 清除画布缓存（sessionStorage），杜绝跨账号数据残留
+      sessionStorage.removeItem('yr-canvas-storage');
+      // ★ 重置 Zustand App Store 到初始状态
+      useAppStore.setState({
+        canvasProjects: [],
+        activeCanvasProjectId: null,
+        activeView: 'chat',
+        isSettingsModalOpen: false,
+        isFilmControlOpen: false,
+        canvasSettings: { defaultImageModel: 'gpt-image-2', defaultVideoModel: 'doubao-seedance-2-0-260128', globalPromptSuffix: '', globalRatio: '16:9', directorGenre: 'default', directorTempo: '' },
+        toastMsg: null,
+        outOfBalanceMsg: null,
+      });
+      setIsAuthenticated(false); setUserRole('user'); window.location.reload();
     }
   };
 

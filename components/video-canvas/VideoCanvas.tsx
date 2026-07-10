@@ -24,7 +24,7 @@ import {
 import '@xyflow/react/dist/style.css'; 
 
 // 🚀 唯一引用的 lucide-react，完美避开所有重名报错
-import { ArrowLeft, Plus, Type, Image as ImageIconIcon, Film, ZoomIn, ZoomOut, Maximize, Clapperboard, Layers, Check, Settings, X, Loader2, RotateCcw, Sliders } from 'lucide-react';
+import { ArrowLeft, Plus, Type, Image as ImageIconIcon, Film, ZoomIn, ZoomOut, Maximize, Clapperboard, Layers, Check, Settings, X, Loader2, RotateCcw, Sliders, ChevronDown } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { GENRE_PRESETS, TEMPO_PROFILES } from '@/lib/director-rules';
 import AssetDock from './AssetDock'; 
@@ -551,13 +551,13 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
                else if (ratioValue >= 0.8 && ratioValue < 1.2) finalRatio = '1:1';
                else if (ratioValue >= 1.2 && ratioValue < 1.5) finalRatio = '4:3';
                
-               // ✨ 修复：在存入本地资产库时，强行把计算出的 ratio 写进去
-               const asset = { id: `local_${Date.now()}`, _type: isVideo ? 'video' : 'image', url: fileUrl, prompt: file.name, timestamp: Date.now(), ratio: finalRatio };
-               
-               const newLocalAssets = [...(currentProject?.localAssets || []), asset];
-               if (typeof updateCanvasProject === 'function' && activeCanvasProjectId) {
-                   updateCanvasProject(activeCanvasProjectId, { localAssets: newLocalAssets });
-               }
+                // ✨ 修复：在存入本地资产库时，强行把计算出的 ratio 写进去
+                const asset = { id: `local_${Date.now()}`, _type: isVideo ? 'video' : 'image', url: fileUrl, prompt: file.name, timestamp: Date.now(), ratio: finalRatio };
+                
+                if (typeof updateCanvasProject === 'function' && activeCanvasProjectId) {
+                    // ★ 函数式更新：从状态机原子快照读取最新 localAssets，杜绝竞态覆盖
+                    updateCanvasProject(activeCanvasProjectId, (prev: any) => ({ localAssets: [...(prev?.localAssets || []), asset] }));
+                }
 
                const newNode = { 
                 id: `node_${Date.now()}`, type: isVideo ? 'render' : 'media', position, 
@@ -682,6 +682,85 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
   // ✨ 自定义全局鼠标样式 (SVG 转 Data URL，黑玻璃水滴形)
   const glassCursor = `url('data:image/svg+xml;utf8,<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5.5 3.5L18.5 11.5L11.5 13.5L7.5 20.5L5.5 3.5Z" fill="rgba(10, 10, 12, 0.5)" stroke="rgba(255, 255, 255, 0.8)" stroke-width="1.5" stroke-linejoin="round" style="backdrop-filter: blur(4px)"/><circle cx="9" cy="9" r="1.5" fill="rgba(255,255,255,0.9)"/></svg>') 5 3, auto`;
 
+  // ★ 自定义下拉选择器 — 替代原生 <select>，深色液态玻璃风格
+  // 使用 createPortal 渲染到 body，彻底避免被抽屉 overflow 裁剪
+  const DirectorSelect = ({ value, onChange, options, placeholder }: {
+    value: string; onChange: (v: string) => void; options: { key: string; label: string }[]; placeholder?: string;
+  }) => {
+    const [open, setOpen] = useState(false);
+    const triggerRef = useRef<HTMLButtonElement>(null);
+    const dropdownRef = useRef<HTMLDivElement>(null);
+    const [pos, setPos] = useState<{ top: number; left: number; width: number }>({ top: 0, left: 0, width: 0 });
+
+    const selectedLabel = options.find(o => o.key === value)?.label || placeholder || '';
+    const isPlaceholder = !value || value === 'default' || (placeholder && value === '');
+
+    const handleToggle = () => {
+      if (!open && triggerRef.current) {
+        const rect = triggerRef.current.getBoundingClientRect();
+        setPos({ top: rect.bottom + 6, left: rect.left, width: rect.width });
+      }
+      setOpen(prev => !prev);
+    };
+
+    // 点击外部关闭 + Esc 关闭
+    useEffect(() => {
+      if (!open) return;
+      const handle = (e: MouseEvent | KeyboardEvent) => {
+        if (e instanceof KeyboardEvent && e.key === 'Escape') { setOpen(false); return; }
+        if (e instanceof MouseEvent) {
+          const target = e.target as Node;
+          if (triggerRef.current?.contains(target)) return;
+          // 下拉菜单在 portal 中，不在 trigger 子树里，需要单独判断
+          const dropdownEl = document.querySelector('[data-dir-select-dropdown]');
+          if (dropdownEl?.contains(target)) return;
+          setOpen(false);
+        }
+      };
+      document.addEventListener('mousedown', handle);
+      document.addEventListener('keydown', handle);
+      return () => { document.removeEventListener('mousedown', handle); document.removeEventListener('keydown', handle); };
+    }, [open]);
+
+    return (
+      <>
+        <button
+          ref={triggerRef}
+          onClick={handleToggle}
+          className="w-full flex items-center justify-between bg-black/40 border border-white/5 hover:border-white/10 rounded-[14px] p-2.5 text-[12px] outline-none cursor-pointer transition-all nodrag group"
+        >
+          <span className={isPlaceholder ? 'text-zinc-500' : 'text-zinc-200'}>
+            {selectedLabel}
+          </span>
+          <ChevronDown size={14} className={`text-zinc-500 transition-transform duration-200 group-hover:text-zinc-300 ${open ? 'rotate-180' : ''}`} />
+        </button>
+        {open && typeof window !== 'undefined' && createPortal(
+          <div
+            data-dir-select-dropdown
+            ref={dropdownRef}
+            className="fixed bg-[#0d0d0f]/98 backdrop-blur-3xl border border-white/[0.08] rounded-[14px] shadow-[0_25px_70px_rgba(0,0,0,0.95)] py-1 max-h-[260px] overflow-y-auto custom-scrollbar z-[9999999] animate-in fade-in slide-in-from-top-2 duration-150"
+            style={{ top: pos.top, left: pos.left, width: pos.width }}
+          >
+            {options.map(opt => (
+              <button
+                key={opt.key}
+                onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onChange(opt.key); setOpen(false); }}
+                className={`w-full text-left px-3 py-2.5 text-[12px] transition-colors ${
+                  opt.key === value
+                    ? 'text-white bg-white/[0.08] font-medium'
+                    : 'text-zinc-400 hover:text-white hover:bg-white/[0.04]'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>,
+          document.body
+        )}
+      </>
+    );
+  };
+
   return (
     <div 
       ref={wrapperRef} 
@@ -720,25 +799,17 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
               <label className="text-[10px] font-extrabold text-zinc-500 uppercase tracking-widest pl-1">
                 导演引擎 (Director Engine)
               </label>
-              <select
-                className="w-full bg-black/40 border border-white/5 focus:border-indigo-500/50 rounded-[14px] p-2.5 text-[12px] text-zinc-300 outline-none nodrag cursor-pointer transition-colors font-mono"
+              <DirectorSelect
                 value={canvasSettings?.directorGenre || 'default'}
-                onChange={(e) => setCanvasSettings({ ...canvasSettings, directorGenre: e.target.value })}
-              >
-                {GENRE_PRESETS.map(g => (
-                  <option key={g.key} value={g.key}>{g.label}</option>
-                ))}
-              </select>
-              <select
-                className="w-full bg-black/40 border border-white/5 focus:border-indigo-500/50 rounded-[14px] p-2.5 text-[12px] text-zinc-300 outline-none nodrag cursor-pointer transition-colors font-mono"
+                onChange={(val) => setCanvasSettings({ ...canvasSettings, directorGenre: val })}
+                options={GENRE_PRESETS.map(g => ({ key: g.key, label: g.label }))}
+              />
+              <DirectorSelect
                 value={canvasSettings?.directorTempo || ''}
-                onChange={(e) => setCanvasSettings({ ...canvasSettings, directorTempo: e.target.value })}
-              >
-                <option value="">跟随题材默认节奏</option>
-                {TEMPO_PROFILES.map(t => (
-                  <option key={t.key} value={t.key}>{t.label}</option>
-                ))}
-              </select>
+                onChange={(val) => setCanvasSettings({ ...canvasSettings, directorTempo: val })}
+                options={TEMPO_PROFILES.map(t => ({ key: t.key, label: t.label }))}
+                placeholder="跟随题材默认节奏"
+              />
               <p className="text-[10px] text-zinc-600 leading-relaxed pl-1">
                 选择题材后，裂变分镜将自动注入导演审美引导。题材默认为"通用"状态，不注入风格化参数。以上为建议，不锁死。
               </p>
