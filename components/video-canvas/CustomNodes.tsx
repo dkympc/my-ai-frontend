@@ -357,6 +357,18 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
     
     try {
       const targetModel = data.model || 'deepseek-v4-pro';
+      
+      // ✨ 核心修复：提取全局导演上下文，让提取资产表格时拥有导演审美意志
+      const canvasSettings = useAppStore.getState().canvasSettings;
+      const directorCtx = canvasSettings?.directorGenre && canvasSettings.directorGenre !== 'default'
+        ? DirectorRouter.resolve(canvasSettings.directorGenre, canvasSettings.directorTempo || undefined)
+        : null;
+      
+      // 组装注入块，如果存在导演规则，则强行附加在 systemPrompt 尾部
+      const directorInjection = directorCtx 
+        ? `\n\n【导演全局视觉约束，提取资产时必须遵循此光影与色彩基调】：\n${directorCtx.llmContextBlock}` 
+        : "";
+
       let systemPrompt = "";
       
       if (type === 'scene') {
@@ -381,7 +393,15 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
 [{"id": "p1", "name": "道具名", "stage": "出现节点", "prompt": "纯中文道具细节描述(详细描述材质、颜色、磨损程度和外观细节，保持静态单独展示)"}]`;
       }
 
-      const payload = { model: targetModel, messages: [{ role: "system", content: systemPrompt }, { role: "user", content: `剧本内容：\n${data.text.substring(0, 15000)}` }] };
+      // 将 systemPrompt 与 directorInjection 拼接发送
+      const payload = { 
+        model: targetModel, 
+        messages: [
+          { role: "system", content: systemPrompt + directorInjection }, 
+          { role: "user", content: `剧本内容：\n${data.text.substring(0, 15000)}` }
+        ] 
+      };
+      
       const response = await fetchApi('/v1/chat/completions', { method: 'POST', body: JSON.stringify(payload) });
       const resData = await response.json();
       const rawContent = resData.choices?.[0]?.message?.content || "";
@@ -462,7 +482,7 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
 
       // 导演路由引擎：裂变前解析题材与节奏参数
       const canvasSettings = useAppStore.getState().canvasSettings;
-      const directorCtx = canvasSettings.directorGenre && canvasSettings.directorGenre !== 'default'
+      const directorCtx = canvasSettings?.directorGenre && canvasSettings.directorGenre !== 'default'
         ? DirectorRouter.resolve(canvasSettings.directorGenre, canvasSettings.directorTempo || undefined)
         : null;
 
@@ -478,17 +498,20 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
             content: `你是一名大师级分镜师兼 AI 提示词专家。你的任务是通读剧本，将剧本高级地转化为符合 AI 视频生成大模型底层逻辑的生产级分镜 JSON 数据。
 
 【智能光影推断 (shotLighting 字段)】
-你必须在 JSON 中为每一个分镜强制输出 "shotLighting" 字段！
-推断规则：比对你在上下文中看到的【资产字典】，根据该场景的光影基调，结合当前分镜的【景别】进行智能打光：
-1. 氛围继承：必须继承字典中该场景的核心色温与反差基调（如始终保持冷暖对比、低照度等）。
-2. 景别裁剪（防画面污染）：若为[特写/极特写/近景]，绝对禁止在光影中描写画外背景光源的实体（如远处的窗户、台灯），只能输出打在主体身上的纯物理光线方向与质感（如: cool blue edge light on right cheek, soft warm fill light, high contrast）。
-3. 全景保留：若为[全景/远景]，则需展现整体环境的体积光或主光源分布。
+你必须在 JSON 中为每一个分镜强制输出纯英文的 "shotLighting" 字段！
+推断优先级与打光规则（严格按以下顺序执行）：
+1. 优先查表与氛围继承（资产表为最高准则）：首先比对你在上下文中看到的【资产字典】。如果该场景在字典中已定义了“英文光影氛围”，你必须 100% 继承其核心色温与反差基调（如始终保持冷暖对比、低照度等），并以此为底色。
+2. 导演规则补底（降级回退）：如果未提供资产字典，或字典中该场景没有光影描述，你才需要去查阅下方《导演审美引导》中的光影倾向，使用导演推荐的英文光影咒语（English Lighting Prompts）进行打光推断。
+3. 景别裁剪（防画面污染）：基调确立后，必须结合当前分镜的具体动作与【景别】推断物理光线方向。若为[特写/极特写/近景]，绝对禁止描写画外背景光源的实体，只能输出打在主体面部/身上的纯物理光线方向与质感（如: cool blue edge light on right cheek, high contrast）。
+4. 全景保留：若为[全景/远景]，则需展现整体环境的体积光或主光源分布。
 
 【视频分镜拆解铁律】
 1. 景别参考规则：优先识别剧本中已有的景别标记(如[特写]、[全景]、[中景]、[近景])，每个分镜时长严格控制在 4-15s 之间。
-2.对白语速与分镜拆分铁律（强制公式计算）：中文字数 ÷ 3.5 = 对应台词所需的【最低安全时长（秒）】。在输出每一个分镜前，你必须先行完成该计算。  
-若一段台词的所需安全时长 **超过 15 秒**，严禁塞入单个分镜。必须主动将其拆分为两个或多个独立镜号（如镜号 2A、镜号 2B，或插入反应镜、空镜头来交替消化对白）。
-中文字数 ÷ 3.5 = 对应台词所需的【最低安全时长（秒）】。物理红线：AI 必须严格执行此数学计算！绝不允许将超过计算时长的台词强塞入短时长的分镜中，绝不允许两人在同一时序内说出长篇大论。如果台词总字数超过 30 字，强制要求你将此分镜拆分为两个独立镜号（如 2A 拍陈医生说话，2B 拍顾医生回复）！
+2. 对白时长 vs 导演节奏的优先级铁律（数学红线）：
+强制计算公式：【本镜对白总中文字数 ÷ 3.5 = 必须满足的最低物理安全时长（秒）】。AI 在输出每个分镜前，必须严格执行此数学计算！
+ - 优先级判定：物理计算此时长绝对优先于《导演审美引导》中的节奏建议！例如：若导演建议节奏为 1-3秒，但当前台词计算需要 8秒，你必须将 duration 设定为 8秒！
+ - 节奏补偿法则：如何在被台词拉长的分镜中体现导演的“快节奏”？通过切碎 timeSegments 内部的时序段来完成！（例如：8 秒的镜头，内部切分为 3-4 个剧烈的物理动作或机位转折，以此制造高密度的视觉快感）。
+ - 强制拆镜红线：绝不允许将超过计算时长的台词强塞入短时长的分镜中，绝不允许两人在同一时序内静止站立说出长篇大论！若某段连续台词耗时超过 15 秒（或总字数超过 40 字），除非导演引擎明确要求“舒缓/长镜头”，否则强制要求你将此分镜拆分为多个独立镜号（如 2A 拍陈医生说话，2B 拍顾医生反应或回复）交替消化对白！
 3. 单分镜内的时序切分铁律（防偷懒与运镜解绑机制）：只要单个分镜时长>=8秒，或对白>15字，严禁在画面主体中只写一个时间段！你必须将其物理拆分为至少两个时序(如 0-5s 和 6-10s)。在时序切换时，不要局限于“硬切”，更鼓励使用连续长镜头内的“动态演进”(如动作连贯延展、平滑推拉跟摇、焦点转换 Rack Focus)。
 4. 物理视觉化描述铁律（去文学化与微表情优化）：禁止文学形容词，必须转化为物理视觉指令。情绪必须转化为微表情(如“眉头微皱”)。详细描述肌肉牵扯、物理位移、衣服褶皱变化及道具物理交互。
 5. 人物空间站位与“时序状态锚定”铁律：在每一个 timeSegments 时间段描述内，只要提及人物动作，必须强行在名字前增加当前姿态/站位状态的修辞锚定词！(如：强制写为“坐在工作台后的 @老匠人 缓缓落下镊子”)，防姿态突变。
@@ -604,19 +627,8 @@ ${directorCtx?.llmContextBlock || ''}`
 【绝对核心准则】
 0. 物理空间站位与调度约束（万物皆有坐标）：
    无论景别多近，只要画面出现人物，必须在名字前强行绑定【空间参照物 + 身体基本姿态】！包含：相对距离（如紧贴、相距一臂）、高低落差（如形成以A为低点、B为高点的三角站位）以及当前姿态（站/蹲/跪）。若原分镜未提及，必须根据逻辑主动推演补充。
-1. 100%继承光影与机位（防闪烁法则）：
-    必须直接照抄提供的英文全局摄影参数，以及上一级为你智能推断出的 shotLighting 英文光影参数。绝对不允许修改或意译！
-    同时，在照抄光影参数后，需要根据当前分镜的具体景别、人物站位和当前情绪，
-    为该静帧补充具体的光线方向描述（如：侧光从左侧打来、逆光形成剪影、
-    底光从下方照亮面部、暖色发丝光从后上方勾勒人物轮廓等）。
-    核心原则：同一物理场景的光影基调必须全程保持一致（Low-Key保持在Low-Key），
-    但每个分镜的光线方向和打光角度应根据叙事需求动态调整，
-    避免所有镜头都用同一种光线角度和方向。
-1.1 参考导演光影基调说明：
-    如果用户消息中有【导演路由引擎 - 审美引导】部分，请阅读其中的
-    ◎ 光影基调建议、◎ 主光/辅光/环境光类型倾向、◎ 建议光比。
-    以此为全局光影基调参考，在设计每个分镜的具体光线方向时与其保持一致。
-    但不要将该块中的任何文本直接拼入生图提示词——它是指引，不是原料。
+1. 100%物理照抄光影与机位（防闪烁法则）：
+必须直接照抄提供的【英文全局摄影参数】，以及上一级为你智能推断出的【shotLighting 参数】！绝对不允许你自行修改、意译，绝对禁止你自行补充任何新的光线方向或光效词汇！ 你的任务只是将它们无缝拼接到提示词中。
 2. 中英混合公式（严格按此顺序拼接）：
    提示词结构 = [当前景别与具体机位角度(含前景遮挡,中文)] + [光影光源方向(中文)] + [画面主体与场景环境(含Z轴站位,中文)] + [面部朝向与视线落点(中文)] + [定格物理动作/蓄力势能(中文)] + [定格微表情(中文)] + [动作引发的视觉动态(如飞溅/飘动,中文)] + [照抄英文全局摄影机参数] + [原样照抄分镜结构里的 shotLighting] + [动态人物肤质后缀(中文)]
 3. 定格动作约束（首帧势能法则）：
@@ -657,7 +669,7 @@ ${directorCtx?.llmContextBlock || ''}`
           },
           { 
             role: "user", 
-            content: `${directorCtx ? directorCtx.llmContextBlock + '\n\n' : ''}【照抄用的英文全局摄影参数】：\n${data.globalCamera}\n\n【需提取首帧图的分镜结构数组(含已智能推断的shotLighting)】：\n${JSON.stringify(json1.shots, null, 2)}`
+            content: `【照抄用的英文全局摄影参数】：\n${data.globalCamera}\n\n【需提取首帧图的已拆解分镜结构数组(含已由上级严格定义的shotLighting和物理动作)】：\n${JSON.stringify(json1.shots, null, 2)}`
           }
         ]
       };
@@ -2349,7 +2361,7 @@ export const MediaNode = ({ id, data, selected }: any) => {
                    ))}
                  </div>
                )}
-                    <MentionTextarea value={data.prompt || ''} onChange={(v: string) => updateNodeData(id, { prompt: v })} placeholder="输入提示词，或输入 @ 选择已连接的参考图参与融合..." incomingAssets={incomingAssets} disableMention={true} />
+                    <MentionTextarea value={data.prompt || ''} onChange={(v: string) => updateNodeData(id, { prompt: v })} placeholder="输入提示词，或输入 @ 选择已连接的参考图参与融合..." incomingAssets={incomingAssets} disableMention={false} />
                  </div>
                  <button onClick={() => setZenMode({ field: 'prompt', label: '生图提示词' })} className="absolute top-3 right-3 p-1.5 bg-black/60 backdrop-blur-md border border-white/10 rounded-lg opacity-0 group-hover/zen:opacity-100 text-zinc-400 hover:text-white hover:bg-white/10 transition-all shadow-md z-10">
                     <Expand size={14}/>

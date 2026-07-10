@@ -653,13 +653,24 @@ export class DirectorRouter {
     const lightingPrompt = lightingParts.join(", ");
 
     // 运镜 Prompt 片段
-    const cameraPrompt = `${genre.cameraSuggestions.recommended.join(", ")}. ${genre.cameraSuggestions.note}`;
+    const recommendedCameras = genre.cameraSuggestions.recommended.map(k => findCamera(k)).filter(Boolean) as CameraMovement[];
+    const cameraPrompt = recommendedCameras.map(c => c.prompt).join(" | ");
 
     // 10% 黄金法则：安全突变投骰子
     const mutation = DirectorRouter.rollMutation(genreKey);
 
     // LLM 注入文本块
-    const llmContextBlock = DirectorRouter.buildLLMContext(genre, tempo, keyLight, fillLight, motivatedLight, specialStyle, mutation);
+    const llmContextBlock = DirectorRouter.buildLLMContext(
+      genre, 
+      tempo, 
+      keyLight, 
+      fillLight, 
+      motivatedLight, 
+      specialStyle, 
+      mutation, 
+      lightingPrompt, // ✨ 新增传参
+      cameraPrompt    // ✨ 新增传参
+    );
 
     return {
       genre: genreKey,
@@ -722,7 +733,9 @@ export class DirectorRouter {
     fillLight: LightingEntry | null,
     motivatedLight: LightingEntry | null,
     specialStyle: LightingEntry | null,
-    mutation: DirectorContext["mutation"]
+    mutation: DirectorContext["mutation"],
+    lightingPrompt: string, // ✨ 新增接收参数
+    cameraPrompt: string    // ✨ 新增接收参数
   ): string {
     const lines = [
       `【导演路由引擎 - 审美引导】
@@ -739,6 +752,8 @@ export class DirectorRouter {
 ● 环境光来源建议：${genre.lightingSuggestions.motivatedLight.map(k => findLight(k)?.label || k).join(" / ")}
 ● 光影风格倾向：${genre.lightingSuggestions.specialStyle.length > 0 ? genre.lightingSuggestions.specialStyle.map(k => findLight(k)?.label || k).join(" / ") : "无特定风格倾向"}
 ● 建议光比：${genre.lightingSuggestions.contrastRatio}
+● 强力建议的英文光影咒语底座（English Lighting Prompts）：【${lightingPrompt}】
+（💡 提示：在推断生成每个分镜的 shotLighting 时，请务必优先调用或重组上方括号内的原生英文词汇！确保光影质感的极致还原。）
 ● 基调备注：${genre.lightingSuggestions.note}
 
 【重要】同一场景内光影基调应保持一致，但每个分镜的光线方向
@@ -750,11 +765,14 @@ export class DirectorRouter {
 每镜时长建议：${tempo.durationRange[0]}-${tempo.durationRange[1]}秒（区间建议，非强制）
 剪辑策略：${tempo.cutDescription}
 运镜速率：${tempo.cameraSpeedDescription}
+动态与速率英文咒语（Speed Prompts）：【${tempo.cameraSpeedPrompt}】
 画面密度：${tempo.visualDensityDescription}
 节奏备注：${genre.tempoSuggestions.note}
 
 【运镜建议】
-推荐运镜：${genre.cameraSuggestions.recommended.join("、")}
+推荐运镜：${genre.cameraSuggestions.recommended.map(k => findCamera(k)?.label || k).join(" / ")}
+强力建议的英文运镜咒语底座（Camera Prompts）：【${cameraPrompt}】
+（💡 提示：在输出分镜 JSON 的 timeSegments 动作描述和 cameraRules 时，请务必优先调用或融合上述的运镜速率和运镜词汇！）
 运镜备注：${genre.cameraSuggestions.note}
 
 【色彩调色板建议】
