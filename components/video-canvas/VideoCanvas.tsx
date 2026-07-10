@@ -119,6 +119,9 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
   // 👇👇👇 新增下面这一行 👇👇👇
   // ✨ 新增：画布“时光机”快照，专门用于抢救误删的节点与连线
   const [deleteHistory, setDeleteHistory] = useState<{nodes: any[], edges: any[]}[]>([]);
+  // ★ 通用撤销快照堆栈（覆盖文本编辑、节点移动等非删除变更），节流采集防内存溢出
+  const [undoHistory, setUndoHistory] = useState<{nodes: any[], edges: any[]}[]>([]);
+  const undoThrottleRef = useRef<NodeJS.Timeout | null>(null);
   const [deletedNodes, setDeletedNodes] = useState<any[]>([]); // ✨ 新增：时空回收站软删除备份栈
   const [isRecyclerOpen, setIsRecyclerOpen] = useState(false); // ✨ 新增：时空回收站展开状态
 
@@ -342,22 +345,27 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
         }
 
         // =====================================
-        // 👇👇👇 这是为你全新加进去的 Ctrl+Z 撤销防误删逻辑
+        // 👇👇👇 Ctrl+Z 撤销：先检查删除历史（紧急），再检查通用快照（文本/拖移）
         // =====================================
         if (isCmdOrCtrl && e.key.toLowerCase() === 'z') {
            e.preventDefault(); // 🛑 核心护盾：坚决拦截浏览器的默认撤销，防止它把你旁边文本框的剧本清空！
            
            if (deleteHistory.length > 0) {
-               // 1. 取出最后一张快照
+               // 优先：撤销最近一次节点/连线删除
                const lastSnapshot = deleteHistory[deleteHistory.length - 1]; 
-               // 2. 瞬间恢复卡片和连线
                setNodes(lastSnapshot.nodes); 
                setEdges(lastSnapshot.edges); 
-               // 3. 撕掉用过的快照
                setDeleteHistory(prev => prev.slice(0, -1)); 
                useAppStore.getState().setToastMsg("↩️ 撤销成功，误删节点已复活！");
+           } else if (undoHistory.length > 0) {
+               // 其次：撤销最近一次文本编辑 / 节点移位的通用快照
+               const lastSnapshot = undoHistory[undoHistory.length - 1];
+               setNodes(lastSnapshot.nodes);
+               setEdges(lastSnapshot.edges);
+               setUndoHistory(prev => prev.slice(0, -1));
+               useAppStore.getState().setToastMsg("↩️ 撤销成功，已恢复到上一步编辑状态！");
            } else {
-               useAppStore.getState().setToastMsg("当前没有可撤销的误删操作");
+               useAppStore.getState().setToastMsg("当前没有可撤销的操作");
            }
         }
 
@@ -366,7 +374,27 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
       document.addEventListener('keydown', handleKeyDown);
       return () => document.removeEventListener('keydown', handleKeyDown);
       
-    }, [clipboard, getNodes, getEdges, setNodes, setEdges, deleteHistory]);
+    }, [clipboard, getNodes, getEdges, setNodes, setEdges, deleteHistory, undoHistory]);
+
+    // ★ 通用撤销快照采集：每次 nodes/edges 变化时，节流推入 undoHistory
+    // 覆盖文本编辑、节点拖移等非删除操作，让 Ctrl+Z 不止能撤销删除
+    useEffect(() => {
+      if (undoThrottleRef.current) clearTimeout(undoThrottleRef.current);
+      undoThrottleRef.current = setTimeout(() => {
+        const currentNodes = getNodes();
+        const currentEdges = getEdges();
+        // 仅在状态与上一次快照不同时才推入（避免无变更重复）
+        const lastSnapshot = undoHistory[undoHistory.length - 1];
+        const sameAsLast = lastSnapshot &&
+          JSON.stringify(lastSnapshot.nodes) === JSON.stringify(currentNodes) &&
+          JSON.stringify(lastSnapshot.edges) === JSON.stringify(currentEdges);
+        if (!sameAsLast && currentNodes.length > 0) {
+          setUndoHistory(prev => [...prev.slice(-49), { nodes: JSON.parse(JSON.stringify(currentNodes)), edges: JSON.parse(JSON.stringify(currentEdges)) }]);
+        }
+        undoThrottleRef.current = null;
+      }, 1500);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [nodes, edges]);
 
     useEffect(() => {
       setEdges((eds) => {

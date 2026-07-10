@@ -69,10 +69,20 @@ export default function ChatPage() {
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
   const forceSyncToServer = () => {
     if (!isAuthenticated || !hasLoadedFromServer) return;
+    // ★ 直接从实时 ref 构建 payload，绕过防抖延迟
+    const freshPayload = JSON.stringify({
+      sessions: sessionsRef.current,
+      imageHistory: imageHistoryRef.current,
+      videoHistory: videoHistoryRef.current,
+      wfSessions: wfSessionsRef.current,
+      settings,
+      canvasProjects: canvasProjectsRef.current
+    });
+    latestPayloadRef.current = freshPayload;
     fetch(`${API_BASE}/v1/user/sync_sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('yr-ai-token')}` },
-      body: latestPayloadRef.current
+      body: freshPayload
     }).catch(e => console.error("Force sync failed", e));
   };
     // 6. 引入聊天大脑
@@ -382,6 +392,15 @@ export default function ChatPage() {
   // ★ 画布数据实时引用，绕过防抖延迟，确保 sendBeacon 发送最新数据
   const canvasProjectsRef = useRef(canvasProjects);
   useEffect(() => { canvasProjectsRef.current = canvasProjects; }, [canvasProjects]);
+  // ★ 同步关键数据实时引用，退出登录/beforeunload 时直接从 ref 构建 payload
+  const sessionsRef = useRef(sessions);
+  const imageHistoryRef = useRef(imageHistory);
+  const videoHistoryRef = useRef(videoHistory);
+  const wfSessionsRef = useRef(wfSessions);
+  useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
+  useEffect(() => { imageHistoryRef.current = imageHistory; }, [imageHistory]);
+  useEffect(() => { videoHistoryRef.current = videoHistory; }, [videoHistory]);
+  useEffect(() => { wfSessionsRef.current = wfSessions; }, [wfSessions]);
    
 
   useEffect(() => { 
@@ -409,19 +428,19 @@ export default function ChatPage() {
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (isAuthenticated && hasLoadedFromServer) {
-        let payload = latestPayloadRef.current;
-        // ★ 将最新画布数据注入 payload（绕过 300ms 防抖延迟，确保关页前最后一刻的修改也同步）
-        if (payload && canvasProjectsRef.current) {
-          try {
-            const parsed = JSON.parse(payload);
-            parsed.canvasProjects = canvasProjectsRef.current;
-            payload = JSON.stringify(parsed);
-          } catch(e) { console.error("[Sync] 合并画布数据失败", e); }
-        }
+        // ★ 直接从实时 ref 构建 payload，完全绕过防抖延迟
+        const freshPayload = JSON.stringify({
+          sessions: sessionsRef.current,
+          imageHistory: imageHistoryRef.current,
+          videoHistory: videoHistoryRef.current,
+          wfSessions: wfSessionsRef.current,
+          settings,
+          canvasProjects: canvasProjectsRef.current
+        });
         const url = `${API_BASE}/v1/user/sync_sessions`;
-        const blob = new Blob([payload], { type: 'application/json' });
+        const blob = new Blob([freshPayload], { type: 'application/json' });
         if (!navigator.sendBeacon(url, blob)) {
-          fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('yr-ai-token')}` }, body: payload, keepalive: true }).catch(() => {});
+          fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('yr-ai-token')}` }, body: freshPayload, keepalive: true }).catch(() => {});
         }
       }
     };
@@ -503,6 +522,26 @@ export default function ChatPage() {
   const handleLogout = async () => {
     const confirmed = await showConfirm("退出登录", "确定要退出登录吗？");
     if (confirmed) {
+      // ★ 退出前强制同步最新数据到云端（绕过防抖，直接构建 payload 并等待完成）
+      if (isAuthenticated && hasLoadedFromServer) {
+        const freshPayload = JSON.stringify({
+          sessions: sessionsRef.current,
+          imageHistory: imageHistoryRef.current,
+          videoHistory: videoHistoryRef.current,
+          wfSessions: wfSessionsRef.current,
+          settings,
+          canvasProjects: canvasProjectsRef.current
+        });
+        try {
+          await fetch(`${API_BASE}/v1/user/sync_sessions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('yr-ai-token')}` },
+            body: freshPayload,
+            keepalive: true
+          });
+        } catch(e) { console.error("[Logout] 退出前同步失败", e); }
+      }
+      
       try { await fetch(`${API_BASE}/v1/logout`, { method: 'POST', headers: { 'Authorization': `Bearer ${localStorage.getItem('yr-ai-token')}` } }); } catch(e) {}
       // ★ 清除认证凭证
       localStorage.removeItem('yr-ai-token');
