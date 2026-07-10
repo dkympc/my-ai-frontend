@@ -31,6 +31,8 @@ import ChatView from '@/components/chat/ChatView';
 import DeleteConfirmModal from '@/components/modals/DeleteConfirmModal';
 import FilePreviewModal from '@/components/modals/FilePreviewModal';
 import AdminRecordsModal from '@/components/modals/AdminRecordsModal';
+import DialogManager from '@/components/modals/DialogManager';
+import { showConfirm } from '@/lib/dialogStore';
 import type { ChatMessage, ChatSession, AttachedFile, MediaMaterial, ImageRecord, VideoRecord, WfSession } from '@/lib/types';
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "";
 export default function ChatPage() {
@@ -484,7 +486,8 @@ export default function ChatPage() {
     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `yr_ai_export_${new Date().getTime()}.json`; a.click(); URL.revokeObjectURL(url);
   };
   const handleLogout = async () => {
-    if (window.confirm("确定要退出登录吗？")) {
+    const confirmed = await showConfirm("退出登录", "确定要退出登录吗？");
+    if (confirmed) {
       try { await fetch(`${API_BASE}/v1/logout`, { method: 'POST', headers: { 'Authorization': `Bearer ${localStorage.getItem('yr-ai-token')}` } }); } catch(e) {}
       localStorage.removeItem('yr-ai-token'); localStorage.removeItem('yr-ai-role'); setIsAuthenticated(false); setUserRole('user'); window.location.reload();
     }
@@ -1270,6 +1273,7 @@ export default function ChatPage() {
       <DeleteConfirmModal isDeleteModalOpen={isDeleteModalOpen} setIsDeleteModalOpen={setIsDeleteModalOpen} confirmDelete={confirmDelete} />
       <AdminRecordsModal viewingUserChats={viewingUserChats} setViewingUserChats={setViewingUserChats} viewingUsername={viewingUsername} adminViewTab={adminViewTab} setAdminViewTab={setAdminViewTab} viewingSpecificChat={viewingSpecificChat} setViewingSpecificChat={setViewingSpecificChat} handleDownloadSpecificRecord={handleDownloadSpecificRecord} setPreviewFileContent={setPreviewFileContent} />
       <FilePreviewModal previewFileContent={previewFileContent} setPreviewFileContent={setPreviewFileContent} />
+      <DialogManager />
     </div>
   );
 }

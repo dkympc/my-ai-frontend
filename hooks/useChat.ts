@@ -2,6 +2,7 @@
 import { useState, useRef, useMemo } from 'react';
 import { fetchApi } from '@/services/api';
 import { useAppStore } from '@/store/useAppStore';
+import { showPrompt } from '@/lib/dialogStore';
 import { ChatSession, ChatMessage, AttachedFile } from '@/lib/types';
 import { MODELS } from '@/lib/constants';
 
@@ -117,7 +118,7 @@ export function useChat(
     } 
   };
   
-  const renameSession = (id: string, e: React.MouseEvent) => { e.stopPropagation(); const newTitle = window.prompt("输入新的标题："); if (newTitle) setSessions(prev => prev.map(s => s.id === id ? { ...s, title: newTitle } : s)); setActiveMenuId(null); };
+  const renameSession = async (id: string, e: React.MouseEvent) => { e.stopPropagation(); const newTitle = await showPrompt("重命名会话", "输入新的标题："); if (newTitle) setSessions(prev => prev.map(s => s.id === id ? { ...s, title: newTitle } : s)); setActiveMenuId(null); };
   
   const generateAutoTitle = async (sessionId: string, userMsg: string, aiMsg: string, model: string) => {
     try {

@@ -7,6 +7,8 @@ import {
 } from 'lucide-react';
 import { MODELS } from '@/lib/constants';
 import { fetchApi } from '@/services/api';
+import { useAppStore } from '@/store/useAppStore';
+import { showConfirm, showMessage } from '@/lib/dialogStore';
 
 interface SettingsModalProps {
   isSettingsModalOpen: boolean;
@@ -45,17 +47,18 @@ export default function SettingsModal({
 
   // 👇==== 将充值函数移入组件内部，并修复类型和状态刷新 ====👇
   const handleAdminRecharge = async (targetUsername: string) => {
-    if (!window.confirm(`确定要给用户 ${targetUsername} 充值 1000 万算力吗？`)) return;
+    const confirmed = await showConfirm("确认充值", `确定要给用户 ${targetUsername} 充值 1000 万算力吗？`);
+    if (!confirmed) return;
     try {
       const res = await fetchApi(`/v1/admin/users/${targetUsername}/recharge`, { method: 'POST' });
       if (res.ok) {
-        alert(`💰 成功给 ${targetUsername} 充值了 1000 万算力！`);
+        useAppStore.getState().setToastMsg(`💰 成功给 ${targetUsername} 充值了 1000 万算力！`);
         fetchAdminData(false);
       } else {
-        alert("充值失败，请查看后端日志。");
+        useAppStore.getState().setToastMsg("充值失败，请查看后端日志。");
       }
     } catch (e) {
-      alert("网络错误");
+      useAppStore.getState().setToastMsg("网络错误");
     }
   };
 
@@ -80,14 +83,14 @@ export default function SettingsModal({
       const res = await fetchApi('/v1/admin/invite-codes/generate', { method: 'POST' });
       if (res.ok) {
         const data = await res.json();
-        alert(`邀请码已生成：${data.code}\n\n24小时内有效，仅供一人注册一次。\n\n请将此码发送给需要注册的用户。`);
+        await showMessage("邀请码已生成", `邀请码：${data.code}\n\n24小时内有效，仅供一人注册一次。\n\n请将此码发送给需要注册的用户。`);
         fetchInviteCodes();
       } else {
         const err = await res.json();
-        alert(err.detail || "生成失败");
+        useAppStore.getState().setToastMsg(err.detail || "生成失败");
       }
     } catch (e) {
-      alert("网络错误");
+      useAppStore.getState().setToastMsg("网络错误");
     }
   };
 
@@ -133,13 +136,13 @@ export default function SettingsModal({
         })
       });
       if (res.ok) {
-        alert("API 配置已更新！重新登录后生效。");
+        useAppStore.getState().setToastMsg("API 配置已更新！重新登录后生效。");
       } else {
         const data = await res.json();
-        alert(data.error?.message || "保存失败");
+        useAppStore.getState().setToastMsg(data.error?.message || "保存失败");
       }
     } catch (e) {
-      alert("网络错误");
+      useAppStore.getState().setToastMsg("网络错误");
     } finally {
       setIsSavingApiConfig(false);
     }
@@ -148,15 +151,15 @@ export default function SettingsModal({
   // 🆕 修改密码
   const handleChangePassword = async () => {
     if (!oldPassword || !newPassword || !confirmNewPassword) {
-      alert("请填写所有密码字段");
+      useAppStore.getState().setToastMsg("请填写所有密码字段");
       return;
     }
     if (newPassword !== confirmNewPassword) {
-      alert("两次输入的新密码不一致");
+      useAppStore.getState().setToastMsg("两次输入的新密码不一致");
       return;
     }
     if (newPassword.length < 4) {
-      alert("新密码长度至少 4 位");
+      useAppStore.getState().setToastMsg("新密码长度至少 4 位");
       return;
     }
     setIsChangingPassword(true);
@@ -166,14 +169,14 @@ export default function SettingsModal({
         body: JSON.stringify({ old_password: oldPassword, new_password: newPassword })
       });
       if (res.ok) {
-        alert("密码修改成功！");
+        useAppStore.getState().setToastMsg("密码修改成功！");
         setOldPassword(""); setNewPassword(""); setConfirmNewPassword("");
       } else {
         const data = await res.json();
-        alert(data.error?.message || "密码修改失败");
+        useAppStore.getState().setToastMsg(data.error?.message || "密码修改失败");
       }
     } catch (e) {
-      alert("网络错误");
+      useAppStore.getState().setToastMsg("网络错误");
     } finally {
       setIsChangingPassword(false);
     }
@@ -691,7 +694,7 @@ export default function SettingsModal({
                         <button
                           onClick={() => {
                             navigator.clipboard.writeText(c.code);
-                            alert(`已复制邀请码：${c.code}`);
+                            useAppStore.getState().setToastMsg(`已复制邀请码：${c.code}`);
                           }}
                           disabled={c.is_used || c.is_expired}
                           className="flex items-center gap-1 px-3 py-1.5 text-[11px] text-zinc-400 hover:text-white bg-white/[0.03] hover:bg-white/10 border border-white/[0.06] rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed"

@@ -30,6 +30,7 @@ import { GENRE_PRESETS, TEMPO_PROFILES } from '@/lib/director-rules';
 import AssetDock from './AssetDock'; 
 import { ImageRecord, VideoRecord } from '@/lib/types'; 
 import { fetchApi } from '@/services/api';
+import { showConfirm } from '@/lib/dialogStore';
 
 interface WorkspaceProps {
     imageHistory: ImageRecord[];
@@ -163,26 +164,47 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
   const customOnNodesChange = useCallback((changes: any[]) => {
     const removeChanges = changes.filter(c => c.type === 'remove');
     if (removeChanges.length > 0) {
-      // 1. 第一道防线：拦截核心主中控和资产表，触发防误删锁
       const hasCriticalNode = removeChanges.some(change => {
         const nodeToDelete = nodes.find(n => n.id === change.id);
         return nodeToDelete && (nodeToDelete.type === 'masterScript' || nodeToDelete.type === 'assetTable');
       });
       
       if (hasCriticalNode) {
-        const confirmDelete = window.confirm("⚠️ 主中控/资产表为分镜核心，您确定要删除吗?");
-        if (!confirmDelete) {
-          // 用户点取消，坚决截断删除操作，完美保护画布底座
-          return;
-        }
+        // ★ 异步弹窗（保持回调签名同步）
+        // 弹窗期间画布被遮罩锁定，nodes/edges/onNodesChange 不会变化
+        const capturedNodes = nodes;
+        const capturedEdges = edges;
+        const capturedOnNodesChange = onNodesChange;
+        showConfirm("⚠️ 主中控/资产表为分镜核心", "您确定要删除吗?", "danger").then((confirmed) => {
+          if (!confirmed) return;
+          // 用户确认后才执行删除 + 时空回收站捕获
+          const newDeletedRecords: any[] = [];
+          removeChanges.forEach(change => {
+            const nodeToDelete = capturedNodes.find(n => n.id === change.id);
+            if (nodeToDelete) {
+              const connectedEdges = capturedEdges.filter(e => e.source === nodeToDelete.id || e.target === nodeToDelete.id);
+              newDeletedRecords.push({
+                id: nodeToDelete.id,
+                node: nodeToDelete,
+                edges: connectedEdges,
+                deletedAt: Date.now()
+              });
+            }
+          });
+          if (newDeletedRecords.length > 0) {
+            setDeletedNodes(prev => [...newDeletedRecords, ...prev]);
+            setDeleteHistory(prev => [...prev, { nodes: capturedNodes, edges: capturedEdges }]);
+          }
+          capturedOnNodesChange(changes);
+        });
+        return; // 异步路径，不同步处理
       }
       
-      // 2. 第二道防线：将删除的节点与其前置/后置物理连线，完好保存进时空回收站
+      // 非关键节点：同步捕获进时空回收站
       const newDeletedRecords: any[] = [];
       removeChanges.forEach(change => {
         const nodeToDelete = nodes.find(n => n.id === change.id);
         if (nodeToDelete) {
-          // 精准过滤并保存连接线
           const connectedEdges = edges.filter(e => e.source === nodeToDelete.id || e.target === nodeToDelete.id);
           newDeletedRecords.push({
             id: nodeToDelete.id,
@@ -194,12 +216,11 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
       });
       
       if (newDeletedRecords.length > 0) {
-        setDeletedNodes(prev => [...newDeletedRecords, ...prev]); // 灌入时空回收站头部
-        setDeleteHistory(prev => [...prev, { nodes, edges }]);   // 拍下案发现场给 Ctrl+Z 备份
+        setDeletedNodes(prev => [...newDeletedRecords, ...prev]);
+        setDeleteHistory(prev => [...prev, { nodes, edges }]);
       }
     }
     
-    // 放行正常节点动作
     onNodesChange(changes);
   }, [nodes, edges, onNodesChange]);
 

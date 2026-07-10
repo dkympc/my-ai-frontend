@@ -4,6 +4,7 @@
 import React, { useState } from 'react';
 import { Plus, MonitorPlay, Clock, MoreVertical, Trash2 } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
+import { showConfirm } from '@/lib/dialogStore';
 
 export default function CanvasVault() {
   // 🚀 核心修复：直接从全局状态读取 canvasProjects，并引入 update 和 set 函数
@@ -19,9 +20,10 @@ export default function CanvasVault() {
     setActiveCanvasProjectId(newId);
   };
 
-  const handleDelete = (id: string, e: React.MouseEvent) => {
+  const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (window.confirm("确定要删除这个画布吗？所有未导出的节点数据都将丢失。")) {
+    const confirmed = await showConfirm("确认删除", "确定要删除这个画布吗？所有未导出的节点数据都将丢失。", "danger");
+    if (confirmed) {
         // 直接更新全局数组过滤掉这个ID
         useAppStore.setState((state: any) => ({
             canvasProjects: state.canvasProjects.filter((p: any) => p.id !== id)
