@@ -26,6 +26,7 @@ import '@xyflow/react/dist/style.css';
 // 🚀 唯一引用的 lucide-react，完美避开所有重名报错
 import { ArrowLeft, Plus, Type, Image as ImageIconIcon, Film, ZoomIn, ZoomOut, Maximize, Clapperboard, Layers, Check, Settings, X, Loader2, RotateCcw, Sliders } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
+import { GENRE_PRESETS, TEMPO_PROFILES } from '@/lib/director-rules';
 import AssetDock from './AssetDock'; 
 import { ImageRecord, VideoRecord } from '@/lib/types'; 
 import { fetchApi } from '@/services/api';
@@ -693,6 +694,37 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
           </div>
 
           <div className="flex-1 p-6 overflow-y-auto custom-scrollbar flex flex-col gap-6">
+            {/* 0. 导演引擎：题材 + 节奏选择 */}
+            <div className="flex flex-col gap-3">
+              <label className="text-[10px] font-extrabold text-zinc-500 uppercase tracking-widest pl-1">
+                导演引擎 (Director Engine)
+              </label>
+              <select
+                className="w-full bg-black/40 border border-white/5 focus:border-indigo-500/50 rounded-[14px] p-2.5 text-[12px] text-zinc-300 outline-none nodrag cursor-pointer transition-colors font-mono"
+                value={canvasSettings?.directorGenre || 'default'}
+                onChange={(e) => setCanvasSettings({ ...canvasSettings, directorGenre: e.target.value })}
+              >
+                {GENRE_PRESETS.map(g => (
+                  <option key={g.key} value={g.key}>{g.label}</option>
+                ))}
+              </select>
+              <select
+                className="w-full bg-black/40 border border-white/5 focus:border-indigo-500/50 rounded-[14px] p-2.5 text-[12px] text-zinc-300 outline-none nodrag cursor-pointer transition-colors font-mono"
+                value={canvasSettings?.directorTempo || ''}
+                onChange={(e) => setCanvasSettings({ ...canvasSettings, directorTempo: e.target.value })}
+              >
+                <option value="">跟随题材默认节奏</option>
+                {TEMPO_PROFILES.map(t => (
+                  <option key={t.key} value={t.key}>{t.label}</option>
+                ))}
+              </select>
+              <p className="text-[10px] text-zinc-600 leading-relaxed pl-1">
+                选择题材后，裂变分镜将自动注入导演审美引导。题材默认为"通用"状态，不注入风格化参数。以上为建议，不锁死。
+              </p>
+            </div>
+
+            <div className="w-full h-px bg-white/[0.05]" />
+
             {/* 1. 比例一键穿透 */}
             <div className="flex flex-col gap-3">
               <label className="text-[10px] font-extrabold text-zinc-500 uppercase tracking-widest pl-1">

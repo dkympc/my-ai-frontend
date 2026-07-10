@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+﻿import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom'; // ✨ 新增：用于渲染悬浮顶层的禅定舱
 import { Handle, Position, useReactFlow, NodeResizeControl, useEdges, useNodes } from '@xyflow/react';
 import { 
@@ -7,6 +7,7 @@ import {
   Upload, Trash2, Play, ArrowRight, ArrowDown, Settings2, CheckSquare, Clapperboard, X, Table, Plus, Expand, Database, Map, Users, Package, MoreHorizontal, Copy
 } from 'lucide-react';
 import { fetchApi } from '@/services/api';
+import { DirectorRouter } from '@/lib/director-rules';
 
 // ✨ 放在 CustomNodes.tsx 文件顶部 imports 区域下方
 const compressImage = (file: File, maxWidth = 1024): Promise<string> => {
@@ -459,6 +460,12 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
             });
             const nextShotStart = maxShotNum + 1;
 
+      // 导演路由引擎：裂变前解析题材与节奏参数
+      const canvasSettings = useAppStore.getState().canvasSettings;
+      const directorCtx = canvasSettings.directorGenre && canvasSettings.directorGenre !== 'default'
+        ? DirectorRouter.resolve(canvasSettings.directorGenre, canvasSettings.directorTempo || undefined)
+        : null;
+
       // ==========================================
       // 🚀 工业级管道 1: 视频分镜拆解 (100% 满血还原，绝不删减)
       // ==========================================
@@ -555,7 +562,8 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
   ]
 }
 \`\`\`
-注意：本次只需输出视频动作和时序数据，生图的光影和首帧锚定在后续处理。`
+ 注意：本次只需输出视频动作和时序数据，生图的光影和首帧锚定在后续处理。
+${directorCtx?.llmContextBlock || ''}`
           },
           { 
             role: "user", 
@@ -597,7 +605,18 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
 0. 物理空间站位与调度约束（万物皆有坐标）：
    无论景别多近，只要画面出现人物，必须在名字前强行绑定【空间参照物 + 身体基本姿态】！包含：相对距离（如紧贴、相距一臂）、高低落差（如形成以A为低点、B为高点的三角站位）以及当前姿态（站/蹲/跪）。若原分镜未提及，必须根据逻辑主动推演补充。
 1. 100%继承光影与机位（防闪烁法则）：
-   必须直接照抄提供的英文全局摄影参数，以及上一级为你智能推断出的 shotLighting 英文光影参数。绝对不允许修改或意译！
+    必须直接照抄提供的英文全局摄影参数，以及上一级为你智能推断出的 shotLighting 英文光影参数。绝对不允许修改或意译！
+    同时，在照抄光影参数后，需要根据当前分镜的具体景别、人物站位和当前情绪，
+    为该静帧补充具体的光线方向描述（如：侧光从左侧打来、逆光形成剪影、
+    底光从下方照亮面部、暖色发丝光从后上方勾勒人物轮廓等）。
+    核心原则：同一物理场景的光影基调必须全程保持一致（Low-Key保持在Low-Key），
+    但每个分镜的光线方向和打光角度应根据叙事需求动态调整，
+    避免所有镜头都用同一种光线角度和方向。
+1.1 参考导演光影基调说明：
+    如果用户消息中有【导演路由引擎 - 审美引导】部分，请阅读其中的
+    ◎ 光影基调建议、◎ 主光/辅光/环境光类型倾向、◎ 建议光比。
+    以此为全局光影基调参考，在设计每个分镜的具体光线方向时与其保持一致。
+    但不要将该块中的任何文本直接拼入生图提示词——它是指引，不是原料。
 2. 中英混合公式（严格按此顺序拼接）：
    提示词结构 = [当前景别与具体机位角度(含前景遮挡,中文)] + [光影光源方向(中文)] + [画面主体与场景环境(含Z轴站位,中文)] + [面部朝向与视线落点(中文)] + [定格物理动作/蓄力势能(中文)] + [定格微表情(中文)] + [动作引发的视觉动态(如飞溅/飘动,中文)] + [照抄英文全局摄影机参数] + [原样照抄分镜结构里的 shotLighting] + [动态人物肤质后缀(中文)]
 3. 定格动作约束（首帧势能法则）：
@@ -638,7 +657,7 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
           },
           { 
             role: "user", 
-            content: `【照抄用的英文全局摄影参数】：\n${data.globalCamera}\n\n【需提取首帧图的分镜结构数组(含已智能推断的shotLighting)】：\n${JSON.stringify(json1.shots, null, 2)}`
+            content: `${directorCtx ? directorCtx.llmContextBlock + '\n\n' : ''}【照抄用的英文全局摄影参数】：\n${data.globalCamera}\n\n【需提取首帧图的分镜结构数组(含已智能推断的shotLighting)】：\n${JSON.stringify(json1.shots, null, 2)}`
           }
         ]
       };
@@ -731,6 +750,16 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
             videoPrompt: finalVideoPromptText,
             lastAppliedSuffix: inheritedSuffix,
             globalRatioOverride: inheritedRatioOverride, // 自动继承全局比例
+
+            // 导演路由引擎上下文（裂变时预计算，供后续生图/生视频使用）
+            _directorContext: directorCtx ? {
+              lightingPrompt: directorCtx.lightingPrompt,
+              cameraPrompt: directorCtx.cameraPrompt,
+              genre: directorCtx.genre,
+              genreLabel: directorCtx.genreLabel,
+              tempo: directorCtx.tempo,
+              tempoLabel: directorCtx.tempoLabel,
+            } : null,
 
             isParsing: false
           }

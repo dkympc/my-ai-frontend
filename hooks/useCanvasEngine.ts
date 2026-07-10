@@ -1,6 +1,7 @@
 // hooks/useCanvasEngine.ts
 import { fetchApi } from '@/services/api';
 import { useAppStore } from '@/store/useAppStore';
+import { DirectorRouter } from '@/lib/director-rules';
 
 // ✨ 全局交通管制中心（内存单例）
 // i2iOptions：去脏重绘专用参数 { baseImage: 底图URL, targetNodeId: 结果写入的新节点ID, prompt: 重绘提示词 }
@@ -182,8 +183,15 @@ export function useCanvasEngine() {
 
     // 2. 提示词拼装（强制将 ratioPrefix 放于最开头，获得大模型的极高遵循度）
     const basePrompt = data.firstFrameAnchor || data.prompt || '';
-    const lighting = data.sceneLighting ? `, ${data.sceneLighting}` : '';
-    const camera = data.globalCamera ? `, ${data.globalCamera}` : '';
+
+    // 导演路由引擎：优先读取裂变时预计算好的结构化导演上下文
+    const directorCtx = data._directorContext;
+    const lighting = directorCtx?.lightingPrompt
+      ? `, ${directorCtx.lightingPrompt}`
+      : (data.sceneLighting ? `, ${data.sceneLighting}` : '');
+    const camera = directorCtx?.cameraPrompt
+      ? `, ${directorCtx.cameraPrompt}`
+      : (data.globalCamera ? `, ${data.globalCamera}` : '');
     const finalPrompt = `${gptRatioPrefix}${basePrompt}${lighting}${camera}${finalStyle}`;
 
     // ==========================================
@@ -207,8 +215,17 @@ export function useCanvasEngine() {
   };
 
   const buildVideoPayload = (data: any, settings: any) => {
+    // 导演路由引擎：优先读取裂变时预计算好的结构化导演上下文
+    const directorCtx = data._directorContext;
+    const lightingLine = directorCtx?.lightingPrompt
+      ? directorCtx.lightingPrompt
+      : (data.sceneLighting || '无');
+    const cameraLine = directorCtx?.cameraPrompt
+      ? directorCtx.cameraPrompt
+      : (data.globalCamera || '无');
+
     // 1. 视频专属提示词拼装
-    const finalVideoPrompt = `【摄影与光影限制】\n机位：${data.globalCamera || '无'}\n光线：${data.sceneLighting || '无'}\n\n【主体动作】\n${data.prompt || data.videoPrompt || ''}`;
+    const finalVideoPrompt = `【摄影与光影限制】\n机位：${cameraLine}\n光线：${lightingLine}\n\n【主体动作】\n${data.prompt || data.videoPrompt || ''}`;
     const targetModel = data.model || settings?.defaultVideoModel || 'doubao-seedance-2-0-260128';
     
     // 2. 渲染精度转换
