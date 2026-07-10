@@ -156,6 +156,7 @@ export default function ChatPage() {
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const [hasLoadedFromServer, setHasLoadedFromServer] = useState(false); 
+  const [hasCanvasLoaded, setHasCanvasLoaded] = useState(false); // ★ 画布专用轻量锁：画布数据加载完立刻放行渲染，不等聊天/生图历史
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -230,8 +231,11 @@ export default function ChatPage() {
         setIsAuthenticated(true);
         setUserRole(data.role);
         setToastMsg("登录成功，欢迎回来");
-        setHasLoadedFromServer(false); 
-        fetchUserData(data.access_token); 
+        setHasLoadedFromServer(false);
+        setHasCanvasLoaded(false);
+        // ★ 分模块加载：画布优先（快速渲染），历史后台补全
+        fetchCanvasProjects(data.access_token); 
+        fetchHistoryData(data.access_token); 
       } else {
         setToastMsg(data.error?.message || "账号或密码错误");
       }
@@ -284,9 +288,50 @@ export default function ChatPage() {
       setRegisterLoading(false);
     }
   };
-  const fetchUserData = async (token: string) => {
+  // ==========================================
+  // ★ 分模块渐进式加载：画布优先，历史数据后台异步补全
+  // ==========================================
+
+  // 🚀 快速通道：只拉画布项目 + 设置（体积小，速度快，消除刷新黑屏）
+  const fetchCanvasProjects = async (token: string) => {
     try {
-      const res = await fetch(`${API_BASE}/v1/user/sessions`, { headers: { 'Authorization': `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE}/v1/user/sessions?modules=canvas`, { headers: { 'Authorization': `Bearer ${token}` } });
+      if (res.ok) {
+        const data = await res.json();
+        
+        // 画布项目数据注入 Zustand
+        if (data.canvasProjects && Array.isArray(data.canvasProjects)) {
+          useAppStore.setState({ canvasProjects: data.canvasProjects });
+        }
+        
+        // settings 合并（体积小，顺便处理）
+        let currentUsername = 'User';
+        try { currentUsername = JSON.parse(atob(token.split('.')[1])).sub; } catch(e) {}
+        const dbSettings = data.settings || {};
+        if (dbSettings.nickname === '依然开发者') dbSettings.nickname = currentUsername;
+        if (dbSettings.avatar === 'RY') dbSettings.avatar = currentUsername.charAt(0).toUpperCase();
+        setSettings(prev => ({ 
+          ...prev, ...dbSettings,
+          nickname: dbSettings.nickname || currentUsername,
+          avatar: dbSettings.avatar || currentUsername.charAt(0).toUpperCase()
+        }));
+        
+        setHasCanvasLoaded(true); // ★ 画布数据就绪，立即放行渲染（不等聊天历史）
+      } else if (res.status === 401) {
+        localStorage.removeItem('yr-ai-token');
+        localStorage.removeItem('yr-ai-role');
+        window.location.reload();
+      }
+    } catch (e) {
+      console.error("[Canvas Load Error] 画布数据加载失败，尝试使用本地缓存：", e);
+      setHasCanvasLoaded(true); // ★ 网络故障时允许画布继续使用本地缓存
+    }
+  };
+
+  // 🐢 后台通道：拉聊天/生图/生视频/工作流历史（数据量大，后台异步加载，不阻塞画布）
+  const fetchHistoryData = async (token: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/v1/user/sessions?modules=chat,image,video,workflow`, { headers: { 'Authorization': `Bearer ${token}` } });
       if (res.ok) {
         const data = await res.json();
         if (data.sessions) {
@@ -316,37 +361,17 @@ export default function ChatPage() {
             if (v.status === 'processing' && v.task_id && v.pollModel) pollVideoTask(v.id, v.task_id, v.pollModel);
           });
         }
-        
         if (data.wfSessions) setWfSessions(data.wfSessions);
-
-        // ✨ 画布项目数据拉取
-        if (data.canvasProjects && Array.isArray(data.canvasProjects)) {
-          useAppStore.setState({ canvasProjects: data.canvasProjects });
-        }
-        
-        let currentUsername = 'User';
-        try { currentUsername = JSON.parse(atob(token.split('.')[1])).sub; } catch(e) {}
-        
-        const dbSettings = data.settings || {};
-        if (dbSettings.nickname === '依然开发者') dbSettings.nickname = currentUsername;
-        if (dbSettings.avatar === 'RY') dbSettings.avatar = currentUsername.charAt(0).toUpperCase();
-        setSettings(prev => ({ 
-          ...prev, ...dbSettings,
-          nickname: dbSettings.nickname || currentUsername,
-          avatar: dbSettings.avatar || currentUsername.charAt(0).toUpperCase()
-        }));
-        setTimeout(() => setHasLoadedFromServer(true), 500);
       } else if (res.status === 401) {
-        // ✨ 新增：如果后端返回 401（Token过期或被踢下线），强制清空并弹回登录页
         localStorage.removeItem('yr-ai-token');
         localStorage.removeItem('yr-ai-role');
         window.location.reload();
       }
     } catch (e) {
-      console.error("[Canvas Sync Error] 云端数据加载失败，回退到本地缓存：", e);
-      setToastMsg("云端数据加载失败，使用本地缓存");
-      setHasLoadedFromServer(true); // ★ 网络故障时允许画布继续使用本地缓存工作
-    } 
+      console.error("[History Load Error] 历史数据后台加载失败：", e);
+    } finally {
+      setHasLoadedFromServer(true); // ★ 无论成功/失败都放行同步（网络故障时 sync POST 本身也会失败，不会误删数据）
+    }
   };
 
   useEffect(() => {
@@ -368,7 +393,10 @@ export default function ChatPage() {
       setIsAuthenticated(true);
       if (role) setUserRole(role);
       setHasLoadedFromServer(false);
-      fetchUserData(token); 
+      setHasCanvasLoaded(false);
+      // ★ 分模块加载：画布优先，历史数据后台异步补全
+      fetchCanvasProjects(token); 
+      fetchHistoryData(token); 
     } else {
       setHasLoadedFromServer(false);
     }
@@ -421,7 +449,7 @@ export default function ChatPage() {
   }, [sessions, imageHistory, videoHistory, wfSessions, settings, canvasProjects]);
   useEffect(() => {
     if (isInitialized && isAuthenticated && hasLoadedFromServer) {
-      const syncTimer = setTimeout(() => { forceSyncToServer(); }, 2000); 
+      const syncTimer = setTimeout(() => { forceSyncToServer(); }, 5000); // ★ 延至5秒减少数据库写入压力
       return () => clearTimeout(syncTimer);
     }
   }, [sessions, imageHistory, videoHistory, wfSessions, settings, canvasProjects, isInitialized, isAuthenticated, hasLoadedFromServer]);
@@ -1329,9 +1357,9 @@ export default function ChatPage() {
 
           {activeView === 'image-gen' && <ImageGenerator imageHistory={imageHistory} setImageHistory={setImageHistory} activeImageId={activeImageId} setActiveImageId={setActiveImageId} />}
           {activeView === 'video-gen' && <VideoGenerator videoHistory={videoHistory} setVideoHistory={setVideoHistory} />}
-          {/* 👇 全新的画布路由控制（增加 hasLoadedFromServer 拦截，防覆盖死锁） 👇 */}
-          {activeView === 'video-canvas' && !activeCanvasProjectId && hasLoadedFromServer && <CanvasVault />}
-          {activeView === 'video-canvas' && activeCanvasProjectId && hasLoadedFromServer && <VideoCanvas imageHistory={imageHistory} videoHistory={videoHistory} />}
+          {/* 👇 画布门控改为 hasCanvasLoaded：画布数据加载完立刻渲染，不等聊天/生图历史 👇 */}
+          {activeView === 'video-canvas' && !activeCanvasProjectId && hasCanvasLoaded && <CanvasVault />}
+          {activeView === 'video-canvas' && activeCanvasProjectId && hasCanvasLoaded && <VideoCanvas imageHistory={imageHistory} videoHistory={videoHistory} />}
         </main>
       </div>
 
