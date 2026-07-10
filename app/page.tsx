@@ -44,6 +44,13 @@ export default function ChatPage() {
   const [loginUsername, setLoginUsername] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
+  // 🆕 注册相关状态
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [registerUsername, setRegisterUsername] = useState("");
+  const [registerPassword, setRegisterPassword] = useState("");
+  const [registerConfirmPassword, setRegisterConfirmPassword] = useState("");
+  const [registerInviteCode, setRegisterInviteCode] = useState("");
+  const [registerLoading, setRegisterLoading] = useState(false);
   const [adminUsers, setAdminUsers] = useState<any[]>([]);
   const [isAdminLoading, setIsAdminLoading] = useState(false);
   const [selectedUser, setSelectedUser] = useState<any>(null);
@@ -52,7 +59,7 @@ export default function ChatPage() {
   const [viewingSpecificChat, setViewingSpecificChat] = useState<any | null>(null);
   const [adminViewTab, setAdminViewTab] = useState<'chats' | 'images' | 'videos' | 'workflows'>('chats');
   const [viewingUsername, setViewingUsername] = useState<string>("");
-  const [activeSettingsTab, setActiveSettingsTab] = useState<'general' | 'instructions' | 'parameters' | 'data' | 'admin'>('general');
+  const [activeSettingsTab, setActiveSettingsTab] = useState<string>('general');
   const [selectedPromptModel, setSelectedPromptModel] = useState('gemini-3.5-flash');
 
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -220,6 +227,49 @@ export default function ChatPage() {
       setToastMsg("网络连接失败，请检查后端服务");
     } finally {
       setLoginLoading(false);
+    }
+  };
+
+  // 🆕 注册函数
+  const handleRegister = async () => {
+    if (!registerUsername.trim() || !registerPassword.trim()) {
+      setToastMsg("请填写用户名和密码");
+      return;
+    }
+    if (registerPassword !== registerConfirmPassword) {
+      setToastMsg("两次输入的密码不一致");
+      return;
+    }
+    if (registerPassword.length < 4) {
+      setToastMsg("密码长度至少 4 位");
+      return;
+    }
+    setRegisterLoading(true);
+    try {
+      const res = await fetchApi('/v1/register', {
+        method: 'POST',
+        requireAuth: false,
+        body: JSON.stringify({
+          username: registerUsername.trim(),
+          password: registerPassword,
+          invite_code: registerInviteCode.trim(),
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setToastMsg("注册成功！请登录。");
+        // 切回登录页，清空注册表单
+        setIsRegistering(false);
+        setLoginUsername(registerUsername); // 预填用户名方便登录
+        setRegisterUsername(""); setRegisterPassword(""); setRegisterConfirmPassword("");
+        setRegisterInviteCode("");
+      } else {
+        setToastMsg(data.error?.message || "注册失败");
+      }
+    } catch (e) {
+      setToastMsg("网络连接失败，请检查后端服务");
+    } finally {
+      setRegisterLoading(false);
     }
   };
   const fetchUserData = async (token: string) => {
@@ -836,7 +886,7 @@ export default function ChatPage() {
         {/* 登录卡片：液态玻璃体                        */}
         {/* ========================================== */}
         <div
-          className="relative z-10 w-full max-w-[380px] mx-6 p-10 rounded-[36px] overflow-hidden"
+          className="relative z-10 w-full max-w-[360px] mx-6 p-8 rounded-[36px] overflow-hidden"
           style={{
             background: 'linear-gradient(165deg, rgba(22,22,22,0.5) 0%, rgba(6,6,6,0.65) 40%, rgba(18,18,18,0.5) 100%)',
             backdropFilter: 'blur(50px)',
@@ -905,94 +955,162 @@ export default function ChatPage() {
 
             {/* ===== 表单区 ===== */}
             <div className="space-y-5">
-              {/* 账号输入框 */}
-              <div style={{ animation: 'fadeSlideUp 0.7s ease-out 0.1s both' }}>
-                <label className="block text-[9px] font-light text-zinc-500 tracking-[0.25em] mb-2 ml-1 select-none">
-                  ACCOUNT
-                </label>
-                <input
-                  type="text"
-                  value={loginUsername}
-                  onChange={(e) => setLoginUsername(e.target.value)}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-all"
-                  placeholder="输入账号"
-                />
-              </div>
+              {!isRegistering ? (
+                <>
+                  {/* ===== 登录模式 ===== */}
+                  {/* 账号输入框 */}
+                  <div style={{ animation: 'fadeSlideUp 0.7s ease-out 0.1s both' }}>
+                    <label className="block text-[9px] font-light text-zinc-500 tracking-[0.25em] mb-2 ml-1 select-none">
+                      ACCOUNT
+                    </label>
+                    <input
+                      type="text"
+                      value={loginUsername}
+                      onChange={(e) => setLoginUsername(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-all"
+                      placeholder="输入账号"
+                    />
+                  </div>
 
-              {/* 密码输入框 */}
-              <div style={{ animation: 'fadeSlideUp 0.7s ease-out 0.2s both' }}>
-                <label className="block text-[9px] font-light text-zinc-500 tracking-[0.25em] mb-2 ml-1 select-none">
-                  PASSWORD
-                </label>
-                <input
-                  type="password"
-                  value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-all"
-                  placeholder="输入密码"
-                />
-              </div>
+                  {/* 密码输入框 */}
+                  <div style={{ animation: 'fadeSlideUp 0.7s ease-out 0.2s both' }}>
+                    <label className="block text-[9px] font-light text-zinc-500 tracking-[0.25em] mb-2 ml-1 select-none">
+                      PASSWORD
+                    </label>
+                    <input
+                      type="password"
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-all"
+                      placeholder="输入密码"
+                    />
+                  </div>
 
-              {/* 登录按钮 */}
-              <div className="pt-3" style={{ animation: 'fadeSlideUp 0.7s ease-out 0.35s both' }}>
-                <button
-                  onClick={handleLogin}
-                  disabled={loginLoading || !loginUsername.trim() || !loginPassword.trim()}
-                  className="relative w-full py-3.5 rounded-2xl font-light text-[13px] tracking-[0.2em] transition-all duration-700 disabled:opacity-20 disabled:cursor-not-allowed overflow-hidden group border border-transparent"
-                  style={{
-                    background: 'linear-gradient(180deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.04) 100%)',
-                    borderColor: 'rgba(255,255,255,0.12)',
-                    boxShadow: '0 0 40px rgba(255,255,255,0.04), inset 0 1px 0 rgba(255,255,255,0.06)',
-                    color: 'rgba(255,255,255,0.9)',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (e.currentTarget.disabled) return;
-                    e.currentTarget.style.background = 'linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.07) 100%)';
-                    e.currentTarget.style.borderColor = 'rgba(255,255,255,0.25)';
-                    e.currentTarget.style.boxShadow = '0 0 60px rgba(255,255,255,0.1), inset 0 1px 0 rgba(255,255,255,0.1)';
-                    e.currentTarget.style.color = 'rgba(255,255,255,1)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'linear-gradient(180deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.04) 100%)';
-                    e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)';
-                    e.currentTarget.style.boxShadow = '0 0 40px rgba(255,255,255,0.04), inset 0 1px 0 rgba(255,255,255,0.06)';
-                    e.currentTarget.style.color = 'rgba(255,255,255,0.9)';
-                  }}
-                >
-                  {/* 光核 */}
-                  <div className="absolute inset-0 rounded-2xl pointer-events-none"
-                       style={{ background: 'radial-gradient(ellipse 60% 40% at 50% 45%, rgba(255,255,255,0.1) 0%, transparent 70%)', animation: 'pulseCore 3s ease-in-out infinite' }} />
-                  <span className="relative z-10 flex items-center justify-center gap-2">
-                    {loginLoading ? <Loader2 size={14} className="animate-spin" /> : null}
-                    {loginLoading ? "验证中..." : "SIGN IN"}
-                  </span>
-                </button>
-              </div>
+                  {/* 登录按钮 */}
+                  <div className="pt-3" style={{ animation: 'fadeSlideUp 0.7s ease-out 0.35s both' }}>
+                    <button
+                      onClick={handleLogin}
+                      disabled={loginLoading || !loginUsername.trim() || !loginPassword.trim()}
+                      className="relative w-full py-3.5 rounded-2xl font-light text-[13px] tracking-[0.2em] transition-all duration-700 disabled:opacity-20 disabled:cursor-not-allowed overflow-hidden group border border-transparent"
+                      style={{
+                        background: 'linear-gradient(180deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.04) 100%)',
+                        borderColor: 'rgba(255,255,255,0.12)',
+                        boxShadow: '0 0 40px rgba(255,255,255,0.04), inset 0 1px 0 rgba(255,255,255,0.06)',
+                        color: 'rgba(255,255,255,0.9)',
+                      }}
+                      onMouseEnter={(e) => {
+                        if (e.currentTarget.disabled) return;
+                        e.currentTarget.style.background = 'linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.07) 100%)';
+                        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.25)';
+                        e.currentTarget.style.boxShadow = '0 0 60px rgba(255,255,255,0.1), inset 0 1px 0 rgba(255,255,255,0.1)';
+                        e.currentTarget.style.color = 'rgba(255,255,255,1)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'linear-gradient(180deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.04) 100%)';
+                        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)';
+                        e.currentTarget.style.boxShadow = '0 0 40px rgba(255,255,255,0.04), inset 0 1px 0 rgba(255,255,255,0.06)';
+                        e.currentTarget.style.color = 'rgba(255,255,255,0.9)';
+                      }}
+                    >
+                      <div className="absolute inset-0 rounded-2xl pointer-events-none"
+                           style={{ background: 'radial-gradient(ellipse 60% 40% at 50% 45%, rgba(255,255,255,0.1) 0%, transparent 70%)', animation: 'pulseCore 3s ease-in-out infinite' }} />
+                      <span className="relative z-10 flex items-center justify-center gap-2">
+                        {loginLoading ? <Loader2 size={14} className="animate-spin" /> : null}
+                        {loginLoading ? "验证中..." : "SIGN IN"}
+                      </span>
+                    </button>
+                  </div>
 
-              {/* 注册按钮（视觉占位） */}
-              <div style={{ animation: 'fadeSlideUp 0.7s ease-out 0.45s both' }}>
-                <button
-                  onClick={() => setToastMsg("注册功能即将开放")}
-                  className="w-full py-3 rounded-2xl font-light text-[12px] tracking-[0.2em] transition-all duration-700 text-zinc-500 hover:text-zinc-300"
-                  style={{
-                    background: 'rgba(255,255,255,0.015)',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.borderColor = 'rgba(255,255,255,0.18)';
-                    e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
-                    e.currentTarget.style.boxShadow = '0 0 20px rgba(255,255,255,0.04)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
-                    e.currentTarget.style.background = 'rgba(255,255,255,0.015)';
-                    e.currentTarget.style.boxShadow = 'none';
-                  }}
-                >
-                  CREATE ACCOUNT
-                </button>
-              </div>
+                  {/* 切换到注册 */}
+                  <div style={{ animation: 'fadeSlideUp 0.7s ease-out 0.45s both' }}>
+                    <button
+                      onClick={() => setIsRegistering(true)}
+                      className="w-full py-3 rounded-2xl font-light text-[12px] tracking-[0.2em] transition-all duration-700 text-zinc-500 hover:text-zinc-300"
+                      style={{
+                        background: 'rgba(255,255,255,0.015)',
+                        border: '1px solid rgba(255,255,255,0.08)',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.18)';
+                        e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+                        e.currentTarget.style.boxShadow = '0 0 20px rgba(255,255,255,0.04)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
+                        e.currentTarget.style.background = 'rgba(255,255,255,0.015)';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }}
+                    >
+                      CREATE ACCOUNT
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* ===== 注册模式 ===== */}
+                  {/* 左上角返回箭头 */}
+                  <button
+                    onClick={() => { setIsRegistering(false); setRegisterUsername(""); setRegisterPassword(""); setRegisterConfirmPassword(""); setRegisterInviteCode(""); }}
+                    className="text-zinc-500 hover:text-zinc-300 transition-colors mb-5"
+                    style={{ animation: 'fadeSlideUp 0.5s ease-out both' }}
+                  >
+                    ←
+                  </button>
+
+                  {/* 用户名 */}
+                  <div style={{ animation: 'fadeSlideUp 0.6s ease-out 0.08s both' }}>
+                    <label className="block text-[9px] font-light text-zinc-500 tracking-[0.25em] mb-1.5 ml-1 select-none">USERNAME</label>
+                    <input type="text" value={registerUsername} onChange={(e) => setRegisterUsername(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-all" placeholder="设置登录账号" />
+                  </div>
+
+                  {/* 密码 */}
+                  <div style={{ animation: 'fadeSlideUp 0.6s ease-out 0.12s both' }}>
+                    <label className="block text-[9px] font-light text-zinc-500 tracking-[0.25em] mb-1.5 ml-1 select-none">PASSWORD</label>
+                    <input type="password" value={registerPassword} onChange={(e) => setRegisterPassword(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-all" placeholder="至少4位" />
+                  </div>
+
+                  {/* 确认密码 */}
+                  <div style={{ animation: 'fadeSlideUp 0.6s ease-out 0.16s both' }}>
+                    <label className="block text-[9px] font-light text-zinc-500 tracking-[0.25em] mb-1.5 ml-1 select-none">CONFIRM</label>
+                    <input type="password" value={registerConfirmPassword} onChange={(e) => setRegisterConfirmPassword(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-all" placeholder="再次输入密码" />
+                  </div>
+
+                  {/* 邀请码 */}
+                  <div style={{ animation: 'fadeSlideUp 0.6s ease-out 0.2s both' }}>
+                    <label className="block text-[9px] font-light text-zinc-500 tracking-[0.25em] mb-1.5 ml-1 select-none">
+                      INVITE CODE <span className="text-red-400/60">*</span>
+                    </label>
+                    <input type="text" value={registerInviteCode} onChange={(e) => setRegisterInviteCode(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-white/20 transition-all" placeholder="联系管理员获取" />
+                  </div>
+
+                  {/* 注册按钮 */}
+                  <div className="pt-2" style={{ animation: 'fadeSlideUp 0.6s ease-out 0.28s both' }}>
+                    <button
+                      onClick={handleRegister}
+                      disabled={registerLoading || !registerUsername.trim() || !registerPassword.trim() || !registerConfirmPassword.trim()}
+                      className="relative w-full py-3.5 rounded-2xl font-light text-[13px] tracking-[0.2em] transition-all duration-700 disabled:opacity-20 disabled:cursor-not-allowed overflow-hidden group border border-transparent"
+                      style={{
+                        background: 'linear-gradient(180deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.04) 100%)',
+                        borderColor: 'rgba(255,255,255,0.12)',
+                        boxShadow: '0 0 40px rgba(255,255,255,0.04), inset 0 1px 0 rgba(255,255,255,0.06)',
+                        color: 'rgba(255,255,255,0.9)',
+                      }}
+                    >
+                      <div className="absolute inset-0 rounded-2xl pointer-events-none"
+                           style={{ background: 'radial-gradient(ellipse 60% 40% at 50% 45%, rgba(255,255,255,0.1) 0%, transparent 70%)', animation: 'pulseCore 3s ease-in-out infinite' }} />
+                      <span className="relative z-10 flex items-center justify-center gap-2">
+                        {registerLoading ? <Loader2 size={14} className="animate-spin" /> : null}
+                        {registerLoading ? "注册中..." : "REGISTER"}
+                      </span>
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -1148,7 +1266,7 @@ export default function ChatPage() {
         <SearchModal isSearchModalOpen={isSearchModalOpen} setIsSearchModalOpen={setIsSearchModalOpen} searchQuery={searchQuery} setSearchQuery={setSearchQuery} searchResults={searchResults} setCurrentSessionId={setCurrentSessionId} setActiveView={setActiveView} />
       </div>
 
-      <SettingsModal isSettingsModalOpen={isSettingsModalOpen} setIsSettingsModalOpen={setIsSettingsModalOpen} activeSettingsTab={activeSettingsTab} setActiveSettingsTab={setActiveSettingsTab} userRole={userRole} settings={settings} setSettings={setSettings} avatarInputRef={avatarInputRef} handleAvatarUpload={handleAvatarUpload} selectedPromptModel={selectedPromptModel} setSelectedPromptModel={setSelectedPromptModel} handleExportData={handleExportData} handleLogout={handleLogout} isAdminLoading={isAdminLoading} fetchAdminData={fetchAdminData} adminUsers={adminUsers} selectedUser={selectedUser} setSelectedUser={setSelectedUser} handleAdminUserAction={handleAdminUserAction} handleViewUserChats={handleViewUserChats} />
+      <SettingsModal isSettingsModalOpen={isSettingsModalOpen} setIsSettingsModalOpen={setIsSettingsModalOpen} activeSettingsTab={activeSettingsTab} setActiveSettingsTab={(val: string) => setActiveSettingsTab(val)} userRole={userRole} settings={settings} setSettings={setSettings} avatarInputRef={avatarInputRef} handleAvatarUpload={handleAvatarUpload} selectedPromptModel={selectedPromptModel} setSelectedPromptModel={setSelectedPromptModel} handleExportData={handleExportData} handleLogout={handleLogout} isAdminLoading={isAdminLoading} fetchAdminData={fetchAdminData} adminUsers={adminUsers} selectedUser={selectedUser} setSelectedUser={setSelectedUser} handleAdminUserAction={handleAdminUserAction} handleViewUserChats={handleViewUserChats} />
       <DeleteConfirmModal isDeleteModalOpen={isDeleteModalOpen} setIsDeleteModalOpen={setIsDeleteModalOpen} confirmDelete={confirmDelete} />
       <AdminRecordsModal viewingUserChats={viewingUserChats} setViewingUserChats={setViewingUserChats} viewingUsername={viewingUsername} adminViewTab={adminViewTab} setAdminViewTab={setAdminViewTab} viewingSpecificChat={viewingSpecificChat} setViewingSpecificChat={setViewingSpecificChat} handleDownloadSpecificRecord={handleDownloadSpecificRecord} setPreviewFileContent={setPreviewFileContent} />
       <FilePreviewModal previewFileContent={previewFileContent} setPreviewFileContent={setPreviewFileContent} />

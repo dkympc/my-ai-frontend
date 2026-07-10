@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   X, User, Cpu, Sliders, Database, Shield, RotateCcw, 
   Loader2, CircleDot, MessageSquare, Settings, 
-  Image as ImageIcon, Film, Puzzle, Download, LogOut 
+  Image as ImageIcon, Film, Puzzle, Download, LogOut, Key, Lock,
+  ChevronDown, Eye, EyeOff, Copy, Plus, Clock, Check, AlertCircle
 } from 'lucide-react';
 import { MODELS } from '@/lib/constants';
+import { fetchApi } from '@/services/api';
 
 interface SettingsModalProps {
   isSettingsModalOpen: boolean;
@@ -44,21 +46,136 @@ export default function SettingsModal({
   // 👇==== 将充值函数移入组件内部，并修复类型和状态刷新 ====👇
   const handleAdminRecharge = async (targetUsername: string) => {
     if (!window.confirm(`确定要给用户 ${targetUsername} 充值 1000 万算力吗？`)) return;
-
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/v1/admin/users/${targetUsername}/recharge`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('yr-ai-token')}` }
-      });
+      const res = await fetchApi(`/v1/admin/users/${targetUsername}/recharge`, { method: 'POST' });
       if (res.ok) {
         alert(`💰 成功给 ${targetUsername} 充值了 1000 万算力！`);
-        // 充值成功后，自动静默刷新大屏数据，让数字立刻变大！
-        fetchAdminData(false); 
+        fetchAdminData(false);
       } else {
         alert("充值失败，请查看后端日志。");
       }
     } catch (e) {
       alert("网络错误");
+    }
+  };
+
+  // 🆕 邀请码管理状态与函数
+  const [inviteCodes, setInviteCodes] = useState<any[]>([]);
+  const [isLoadingInvites, setIsLoadingInvites] = useState(false);
+
+  const fetchInviteCodes = async () => {
+    setIsLoadingInvites(true);
+    try {
+      const res = await fetchApi('/v1/admin/invite-codes');
+      if (res.ok) {
+        const data = await res.json();
+        setInviteCodes(data.data || []);
+      }
+    } catch (e) { /* 静默 */ }
+    finally { setIsLoadingInvites(false); }
+  };
+
+  const handleGenerateInviteCode = async () => {
+    try {
+      const res = await fetchApi('/v1/admin/invite-codes/generate', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        alert(`邀请码已生成：${data.code}\n\n24小时内有效，仅供一人注册一次。\n\n请将此码发送给需要注册的用户。`);
+        fetchInviteCodes();
+      } else {
+        const err = await res.json();
+        alert(err.detail || "生成失败");
+      }
+    } catch (e) {
+      alert("网络错误");
+    }
+  };
+
+  // 进入Admin页时自动加载邀请码
+  React.useEffect(() => {
+    if (activeSettingsTab === 'admin' && userRole === 'admin') {
+      fetchInviteCodes();
+    }
+  }, [activeSettingsTab, userRole]);
+
+  // 🆕 API 配置相关状态
+  const [apiKey, setApiKey] = useState("");
+  const [apiBaseUrl, setApiBaseUrl] = useState("");
+  const [dmxApiKey, setDmxApiKey] = useState("");
+  const [dmxBaseUrl, setDmxBaseUrl] = useState("");
+  const [isSavingApiConfig, setIsSavingApiConfig] = useState(false);
+  // 🆕 折叠/展开状态
+  const [showApiSection, setShowApiSection] = useState(false);
+  const [showDmxSection, setShowDmxSection] = useState(false);
+  // 🆕 Key 掩码可见性
+  const [showApiKeyVisible, setShowApiKeyVisible] = useState(false);
+  const [showDmxKeyVisible, setShowDmxKeyVisible] = useState(false);
+  // 🆕 修改密码折叠
+  const [showPasswordSection, setShowPasswordSection] = useState(false);
+
+  // 🆕 修改密码状态
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+
+  // 🆕 保存 API 配置
+  const handleSaveApiConfig = async () => {
+    setIsSavingApiConfig(true);
+    try {
+      const res = await fetchApi('/v1/user/update-api-config', {
+        method: 'POST',
+        body: JSON.stringify({
+          api_key: apiKey.trim(),
+          api_base_url: apiBaseUrl.trim(),
+          dmx_api_key: dmxApiKey.trim(),
+          dmx_base_url: dmxBaseUrl.trim(),
+        })
+      });
+      if (res.ok) {
+        alert("API 配置已更新！重新登录后生效。");
+      } else {
+        const data = await res.json();
+        alert(data.error?.message || "保存失败");
+      }
+    } catch (e) {
+      alert("网络错误");
+    } finally {
+      setIsSavingApiConfig(false);
+    }
+  };
+
+  // 🆕 修改密码
+  const handleChangePassword = async () => {
+    if (!oldPassword || !newPassword || !confirmNewPassword) {
+      alert("请填写所有密码字段");
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      alert("两次输入的新密码不一致");
+      return;
+    }
+    if (newPassword.length < 4) {
+      alert("新密码长度至少 4 位");
+      return;
+    }
+    setIsChangingPassword(true);
+    try {
+      const res = await fetchApi('/v1/user/change-password', {
+        method: 'POST',
+        body: JSON.stringify({ old_password: oldPassword, new_password: newPassword })
+      });
+      if (res.ok) {
+        alert("密码修改成功！");
+        setOldPassword(""); setNewPassword(""); setConfirmNewPassword("");
+      } else {
+        const data = await res.json();
+        alert(data.error?.message || "密码修改失败");
+      }
+    } catch (e) {
+      alert("网络错误");
+    } finally {
+      setIsChangingPassword(false);
     }
   };
   // 👆====================================================👆
@@ -83,6 +200,7 @@ export default function SettingsModal({
               { id: 'general', icon: <User size={16} />, label: '通用设置' },
               { id: 'instructions', icon: <Cpu size={16} />, label: '个性化指令' },
               { id: 'parameters', icon: <Sliders size={16} />, label: '模型微调' },
+              { id: 'api-config', icon: <Key size={16} />, label: 'API 配置' },
               { id: 'data', icon: <Database size={16} />, label: '数据与存储' },
             ].map(tab => (
               <button 
@@ -258,11 +376,177 @@ export default function SettingsModal({
             </div>
           )}
 
+          {/* 🆕 API 配置标签页 */}
+          {activeSettingsTab === 'api-config' && (
+            <div className="space-y-6 max-w-xl animate-in slide-in-from-bottom-4 fade-in duration-500">
+              <div>
+                <h2 className="text-[28px] font-bold tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-white to-zinc-500 mb-2">API 配置</h2>
+                <p className="text-[13px] text-zinc-500 font-light">配置您的专属 AI API Key 和 Base URL，系统将使用您的 Key 调用上游服务。</p>
+              </div>
+
+              {/* 提示：不填Key则无法使用AI */}
+              <div className="bg-amber-500/5 border border-amber-500/15 rounded-[20px] p-5">
+                <p className="text-[12px] text-amber-400/80 font-light leading-relaxed">
+                  如果您未配置 API Key，系统将<strong>无法</strong>为您提供 AI 服务。请填入您在中转站（如 New-API）或官方平台申请的 Key。
+                </p>
+              </div>
+
+              {/* ===== 折叠块：New-API 配置 ===== */}
+              <div className="bg-white/[0.02] border border-white/[0.08] rounded-[20px] overflow-hidden">
+                <button
+                  onClick={() => { setShowApiSection(!showApiSection); }}
+                  className="w-full flex items-center justify-between px-5 py-4 hover:bg-white/[0.03] transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <MessageSquare size={14} className="text-zinc-400" />
+                    <div className="text-left">
+                      <span className="text-[13px] font-medium text-zinc-200">New-API（聊天 / 生图 / 工作流）</span>
+                      <p className="text-[10px] text-zinc-500 font-light mt-0.5">
+                        {apiKey ? '已配置 Key' : '尚未配置'}
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronDown size={16} className={`text-zinc-500 transition-transform duration-300 ${showApiSection ? 'rotate-180' : ''}`} />
+                </button>
+                {showApiSection && (
+                  <div className="px-5 pb-5 space-y-3 border-t border-white/[0.05] pt-4">
+                    <div>
+                      <label className="text-[10px] font-medium text-zinc-500 tracking-wider uppercase mb-1.5 block">API Key</label>
+                      <div className="relative">
+                        <input 
+                          type={showApiKeyVisible ? "text" : "password"}
+                          value={apiKey} onChange={(e) => setApiKey(e.target.value)}
+                          placeholder="sk-xxx..."
+                          autoComplete="off"
+                          onCopy={(e) => e.preventDefault()}
+                          onCut={(e) => e.preventDefault()}
+                          onContextMenu={(e) => e.preventDefault()}
+                          onDragStart={(e) => e.preventDefault()}
+                          style={{ userSelect: 'none', WebkitUserSelect: 'none' } as React.CSSProperties}
+                          className="w-full bg-black/40 border border-white/[0.08] rounded-[14px] px-4 py-3 pr-10 text-[13px] text-zinc-200 placeholder-zinc-600 focus:border-white/30 transition-all outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowApiKeyVisible(!showApiKeyVisible)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
+                        >
+                          {showApiKeyVisible ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-medium text-zinc-500 tracking-wider uppercase mb-1.5 block">Base URL</label>
+                      <input 
+                        type="text" value={apiBaseUrl} onChange={(e) => setApiBaseUrl(e.target.value)}
+                        placeholder="https://您的中转站地址"
+                        className="w-full bg-black/40 border border-white/[0.08] rounded-[14px] px-4 py-3 text-[13px] text-zinc-200 placeholder-zinc-600 focus:border-white/30 transition-all outline-none"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* ===== 折叠块：DMX API 配置 ===== */}
+              <div className="bg-white/[0.02] border border-white/[0.08] rounded-[20px] overflow-hidden">
+                <button
+                  onClick={() => { setShowDmxSection(!showDmxSection); }}
+                  className="w-full flex items-center justify-between px-5 py-4 hover:bg-white/[0.03] transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <Film size={14} className="text-zinc-400" />
+                    <div className="text-left">
+                      <span className="text-[13px] font-medium text-zinc-200">DMX API（视频生成）</span>
+                      <p className="text-[10px] text-zinc-500 font-light mt-0.5">
+                        {dmxApiKey ? '已配置 Key' : '尚未配置'}
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronDown size={16} className={`text-zinc-500 transition-transform duration-300 ${showDmxSection ? 'rotate-180' : ''}`} />
+                </button>
+                {showDmxSection && (
+                  <div className="px-5 pb-5 space-y-3 border-t border-white/[0.05] pt-4">
+                    <div>
+                      <label className="text-[10px] font-medium text-zinc-500 tracking-wider uppercase mb-1.5 block">DMX API Key</label>
+                      <div className="relative">
+                        <input 
+                          type={showDmxKeyVisible ? "text" : "password"}
+                          value={dmxApiKey} onChange={(e) => setDmxApiKey(e.target.value)}
+                          placeholder="视频 Key（选填）"
+                          autoComplete="off"
+                          onCopy={(e) => e.preventDefault()}
+                          onCut={(e) => e.preventDefault()}
+                          onContextMenu={(e) => e.preventDefault()}
+                          onDragStart={(e) => e.preventDefault()}
+                          style={{ userSelect: 'none', WebkitUserSelect: 'none' } as React.CSSProperties}
+                          className="w-full bg-black/40 border border-white/[0.08] rounded-[14px] px-4 py-3 pr-10 text-[13px] text-zinc-200 placeholder-zinc-600 focus:border-white/30 transition-all outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowDmxKeyVisible(!showDmxKeyVisible)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
+                        >
+                          {showDmxKeyVisible ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-medium text-zinc-500 tracking-wider uppercase mb-1.5 block">DMX Base URL</label>
+                      <input 
+                        type="text" value={dmxBaseUrl} onChange={(e) => setDmxBaseUrl(e.target.value)}
+                        placeholder="视频 API 地址（选填）"
+                        className="w-full bg-black/40 border border-white/[0.08] rounded-[14px] px-4 py-3 text-[13px] text-zinc-200 placeholder-zinc-600 focus:border-white/30 transition-all outline-none"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 保存按钮 */}
+              <button 
+                onClick={handleSaveApiConfig} 
+                disabled={isSavingApiConfig}
+                className="w-full py-4 bg-white text-black hover:bg-zinc-200 rounded-2xl text-[14px] font-bold shadow-[0_0_20px_rgba(255,255,255,0.2)] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {isSavingApiConfig ? <Loader2 size={16} className="animate-spin" /> : null}
+                {isSavingApiConfig ? "保存中..." : "保存 API 配置"}
+              </button>
+            </div>
+          )}
+
           {activeSettingsTab === 'data' && (
             <div className="space-y-8 max-w-xl animate-in slide-in-from-bottom-4 fade-in duration-500">
               <div>
                 <h2 className="text-[28px] font-bold tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-white to-zinc-500 mb-2">数据与存储</h2>
                 <p className="text-[13px] text-zinc-500 font-light">管理存储在本地浏览器中的所有对话与生成记录。</p>
+              </div>
+
+              {/* 🆕 修改密码（可折叠） */}
+              <div className="bg-white/[0.02] border border-white/[0.08] rounded-[20px] overflow-hidden">
+                <button
+                  onClick={() => { setShowPasswordSection(!showPasswordSection); setOldPassword(""); setNewPassword(""); setConfirmNewPassword(""); }}
+                  className="w-full flex items-center justify-between px-5 py-4 hover:bg-white/[0.03] transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <Lock size={14} className="text-zinc-400" />
+                    <span className="text-[13px] font-medium text-zinc-200">修改密码</span>
+                  </div>
+                  <ChevronDown size={16} className={`text-zinc-500 transition-transform duration-300 ${showPasswordSection ? 'rotate-180' : ''}`} />
+                </button>
+                {showPasswordSection && (
+                  <div className="px-5 pb-5 space-y-3 border-t border-white/[0.05] pt-4">
+                    <input type="password" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)}
+                      placeholder="当前密码" className="w-full bg-black/40 border border-white/[0.08] rounded-[14px] px-4 py-3 text-[13px] text-zinc-200 placeholder-zinc-600 focus:border-white/30 transition-all outline-none" />
+                    <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="新密码（至少4位）" className="w-full bg-black/40 border border-white/[0.08] rounded-[14px] px-4 py-3 text-[13px] text-zinc-200 placeholder-zinc-600 focus:border-white/30 transition-all outline-none" />
+                    <input type="password" value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)}
+                      placeholder="确认新密码" className="w-full bg-black/40 border border-white/[0.08] rounded-[14px] px-4 py-3 text-[13px] text-zinc-200 placeholder-zinc-600 focus:border-white/30 transition-all outline-none" />
+                    <button onClick={handleChangePassword} disabled={isChangingPassword}
+                      className="flex items-center justify-center gap-2 w-full py-3 bg-white/[0.05] hover:bg-white/10 border border-white/[0.08] text-zinc-300 rounded-[14px] text-[13px] font-medium transition-all disabled:opacity-50">
+                      {isChangingPassword ? <Loader2 size={14} className="animate-spin" /> : <Lock size={14} />}
+                      {isChangingPassword ? "修改中..." : "确认修改"}
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="bg-white/[0.02] border border-white/[0.08] rounded-[24px] p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-lg">
@@ -358,6 +642,67 @@ export default function SettingsModal({
                   </table>
                 </div>
               )}
+
+              {/* 🆕 邀请码管理 */}
+              <div className="bg-white/[0.02] border border-white/[0.05] rounded-[24px] p-6 shadow-lg">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-[14px] font-medium text-white flex items-center gap-2">
+                      <Key size={14} className="text-zinc-400" /> 邀请码管理
+                    </h3>
+                    <p className="text-[11px] text-zinc-500 font-light mt-1">生成一次性邀请码（24小时有效，用后即焚）。</p>
+                  </div>
+                  <button
+                    onClick={handleGenerateInviteCode}
+                    className="flex items-center gap-2 px-4 py-2.5 bg-white text-black hover:bg-zinc-200 rounded-xl text-[12px] font-bold transition-all shadow-[0_0_20px_rgba(255,255,255,0.15)]"
+                  >
+                    <Plus size={14} /> 生成邀请码
+                  </button>
+                </div>
+
+                {isLoadingInvites ? (
+                  <div className="flex items-center justify-center py-8 opacity-50">
+                    <Loader2 className="animate-spin text-white" size={20} />
+                  </div>
+                ) : inviteCodes.length === 0 ? (
+                  <p className="text-[12px] text-zinc-600 font-light text-center py-6">暂无邀请码，点击上方按钮生成</p>
+                ) : (
+                  <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar">
+                    {inviteCodes.map((c, i) => (
+                      <div key={i} className={`flex items-center justify-between px-4 py-3 rounded-xl border text-[12px] ${c.is_used ? 'bg-zinc-800/30 border-white/[0.03]' : c.is_expired ? 'bg-red-500/5 border-red-500/10' : 'bg-white/[0.03] border-white/[0.06]'}`}>
+                        <div className="flex items-center gap-3">
+                          <span className={`font-mono text-[13px] font-bold tracking-wide ${c.is_used ? 'text-zinc-500 line-through' : c.is_expired ? 'text-red-400' : 'text-green-400'}`}>
+                            {c.code}
+                          </span>
+                          {c.is_used ? (
+                            <span className="flex items-center gap-1 text-[10px] text-zinc-500">
+                              <Check size={10} /> 已被 {c.used_by} 使用
+                            </span>
+                          ) : c.is_expired ? (
+                            <span className="flex items-center gap-1 text-[10px] text-red-400">
+                              <AlertCircle size={10} /> 已过期
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1 text-[10px] text-green-400/60">
+                              <Clock size={10} /> {Math.floor(c.expires_in_seconds / 3600)}h {Math.floor((c.expires_in_seconds % 3600) / 60)}m 后过期
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(c.code);
+                            alert(`已复制邀请码：${c.code}`);
+                          }}
+                          disabled={c.is_used || c.is_expired}
+                          className="flex items-center gap-1 px-3 py-1.5 text-[11px] text-zinc-400 hover:text-white bg-white/[0.03] hover:bg-white/10 border border-white/[0.06] rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          <Copy size={10} /> 复制
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {selectedUser && (
                 <div className="fixed inset-0 z-[100000] flex items-center justify-center p-4">

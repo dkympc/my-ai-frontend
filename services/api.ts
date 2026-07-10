@@ -35,10 +35,11 @@ export async function fetchApi(endpoint: string, options: FetchOptions = {}) {
     const response = await fetch(`${API_BASE}${endpoint}`, config);
 
     // 3. 全局拦截异常状态码 (统一海关处理)
-    if (response.status === 401) {
+    // 🚨 401 只在已登录状态下才触发重载（排除登录接口本身的 401）
+    if (response.status === 401 && requireAuth) {
       localStorage.removeItem('yr-ai-token');
       localStorage.removeItem('yr-ai-role');
-      useAuthStore.getState().setIsAuthenticated(false); // 直接调用 Zustand 修改状态
+      useAuthStore.getState().setIsAuthenticated(false);
       window.location.reload();
       throw new Error("Unauthorized");
     }
