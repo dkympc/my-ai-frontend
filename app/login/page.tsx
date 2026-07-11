@@ -1,5 +1,6 @@
 "use client";
 import React, { useState, useEffect } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Loader2, AlertTriangle } from "lucide-react";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -618,6 +619,12 @@ export default function LoginPage() {
 
         {/* 内容区 */}
         <div className="relative z-[5]">
+          {/* ★ 返回首页 */}
+          <Link href="/" className="inline-flex items-center gap-1.5 mb-6 text-[10px] text-zinc-600 hover:text-zinc-400 tracking-[0.15em] font-light transition-colors"
+            style={{ animation: 'fadeSlideUp 0.5s ease-out both' }}>
+            ← 返回首页
+          </Link>
+
           {/* LOGO 区 */}
           <div className="flex flex-col items-center mb-10">
             <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-5 relative"

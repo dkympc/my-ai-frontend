@@ -38,15 +38,16 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "";
 
 export default function WorkspaceApp() {
   const router = useRouter();
+  const isLoggingOutRef = useRef(false); // ★ 防 handleLogout 触发的 isAuthenticated 变更导致竞态跳转
 
   // 从 Zustand 状态库提取全局状态
   const { isAuthenticated, userRole, isAuthChecking, setIsAuthenticated, setUserRole, setIsAuthChecking } = useAuthStore();
   const { activeView, activeCanvasProjectId, isSettingsModalOpen, settings, toastMsg, outOfBalanceMsg, setActiveView, setIsSettingsModalOpen, setSettings, setToastMsg, setOutOfBalanceMsg } = useAppStore();
   const canvasProjects = useAppStore(state => state.canvasProjects);
 
-  // ★ 未登录则重定向到 /login
+  // ★ 未登录则重定向到 /login（手动退出登录时除外，避免与 router.push('/') 竞态）
   useEffect(() => {
-    if (!isAuthChecking && !isAuthenticated) {
+    if (!isAuthChecking && !isAuthenticated && !isLoggingOutRef.current) {
       router.replace('/login');
     }
   }, [isAuthenticated, isAuthChecking, router]);
@@ -523,8 +524,9 @@ export default function WorkspaceApp() {
         toastMsg: null,
         outOfBalanceMsg: null,
       });
+      // ★ 先设标记防止 useEffect 跳转到 /login，再改变认证状态，最后跳首页
+      isLoggingOutRef.current = true;
       setIsAuthenticated(false); setUserRole('user');
-      // ★ 改为路由跳转而非 reload，回到首页（未登录则看到落地页）
       router.push('/');
     }
   };
