@@ -3,7 +3,7 @@
 const FASTAPI_BASE_URL = process.env.NODE_ENV === 'development' 
   ? 'http://127.0.0.1:8000' 
   // 下面这行换成 Sealos 刚刚给你分配的真实内网全名！
-  : 'http://82.157.193.46:8000';
+  : 'http://49.232.57.73:8000';
 
 const nextConfig = {
   output: 'standalone',

@@ -111,8 +111,23 @@ export function useCanvasEngine() {
       targetSize = 'auto'; // 后端会做兜底过滤，确保不触发上游限制
     } 
     else if (targetModel === 'banana-pro') {
-      // 🚨 Banana Pro: 宽高比与像素值有极其精准、强硬的官方映射，若不符会直接报 400!
-      // 划分：1K (标准), 2K (高清), 4K (极致) 三档
+      // 🍌 Banana Pro: 走 Gemini 原生的 aspectRatio + imageSize 控制比例和分辨率
+      // ⚠️ 双保险策略：部分代理站（如 bvctfwcsoqeb.sealoshzh.site）不转发 imageConfig.aspectRatio，
+      // 因此在 Prompt 中注入英文比例描述作为兜底，确保代理站也能正确出图
+      const bananaRatioPrefixMap: Record<string, string> = {
+        '1:1': 'square format 1:1, ',
+        '16:9': 'widescreen 16:9, ',
+        '9:16': 'vertical 9:16 portrait, ',
+        '4:3': '4:3 aspect ratio, ',
+        '3:4': '3:4 vertical, ',
+        '21:9': 'ultrawide 21:9 cinematic, ',
+        '2:3': '2:3 portrait, ',
+        '3:2': '3:2 landscape, ',
+        '4:5': '4:5 vertical, ',
+        '5:4': '5:4 landscape, '
+      };
+      gptRatioPrefix = bananaRatioPrefixMap[ratio] || '1:1 square, ';
+      
       let resolutionGrade = '1K'; // 默认 1K
       if (quality.includes('2K') || quality.includes('高清') || quality.includes('HD')) {
         resolutionGrade = '2K';
@@ -120,27 +135,11 @@ export function useCanvasEngine() {
         resolutionGrade = '4K';
       }
 
-      // 10 种宽高比与 1K/2K/4K 像素的官方矩阵映射
-      const googleGrid: Record<string, Record<string, string>> = {
-        '1:1': { '1K': '1024x1024', '2K': '2048x2048', '4K': '4096x4096' },
-        '2:3': { '1K': '848x1264',  '2K': '1696x2528', '4K': '3392x5056' },
-        '3:2': { '1K': '1264x848',  '2K': '2528x1696', '4K': '5056x3392' },
-        '3:4': { '1K': '896x1200',  '2K': '1792x2400', '4K': '3584x4800' },
-        '4:3': { '1K': '1200x896',  '2K': '2400x1792', '4K': '4800x3584' },
-        '4:5': { '1K': '928x1152',  '2K': '1856x2304', '4K': '3712x4608' },
-        '5:4': { '1K': '1152x928',  '2K': '2304x1856', '4K': '4608x3712' },
-        '9:16': { '1K': '768x1376',  '2K': '1536x2752', '4K': '3072x5504' },
-        '16:9': { '1K': '1376x768',  '2K': '2752x1536', '4K': '5504x3072' },
-        '21:9': { '1K': '1584x672',  '2K': '3168x1344', '4K': '6336x2688' },
-      };
-
-      const ratioGrid = googleGrid[ratio] || googleGrid['16:9'];
-      targetSize = ratioGrid[resolutionGrade] || ratioGrid['1K'];
-      
-      // 传递比例控制变量，后端会平铺在 payload 顶层
+      // Gemini 原生不需要 size 字段（比例由 aspectRatio 锁定，分辨率由 imageSize 控制）
+      targetSize = 'auto';
       extraParams = {
-        "aspect_ratio": ratio,
-        "aspectRatio": ratio
+        "aspectRatio": ratio,      // 比例字符串，如 "16:9"、"9:16"（Gemini 原生字段名）
+        "imageSize": resolutionGrade  // 分辨率档位，如 "1K"、"2K"、"4K"
       };
     }
     else if (targetModel === 'seedream5.0') {
@@ -155,11 +154,11 @@ export function useCanvasEngine() {
         targetSize = seedreamGrade;
       } else {
         const seedreamGrid: Record<string, Record<string, string>> = {
-          '16:9': { '2K': '2560x1440', '3K': '3072x1728' },
-          '9:16': { '2K': '1440x2560', '3K': '1728x3072' },
-          '4:3':  { '2K': '2048x1536', '3K': '3072x2304' },
-          '3:4':  { '2K': '1536x2048', '3K': '2304x3072' },
-          '21:9': { '2K': '2880x1224', '3K': '3072x1312' }
+          '16:9': { '2K': '2736x1538', '3K': '3456x1944' },
+          '9:16': { '2K': '1538x2736', '3K': '1944x3456' },
+          '4:3':  { '2K': '2364x1774', '3K': '3072x2304' },
+          '3:4':  { '2K': '1774x2364', '3K': '2304x3072' },
+          '21:9': { '2K': '3136x1344', '3K': '3584x1536' }
         };
         const ratioGrid = seedreamGrid[ratio] || seedreamGrid['16:9'];
         targetSize = ratioGrid[seedreamGrade] || ratioGrid['2K'];

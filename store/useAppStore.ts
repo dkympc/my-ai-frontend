@@ -1,6 +1,19 @@
 // store/useAppStore.ts
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware'; // ✨ 引入持久化魔法
+
+// ★ 救命底稿：localStorage 键名，存储完整画布项目（含 nodes/edges/localAssets）
+const CANVAS_BACKUP_KEY = 'yr-canvas-full-backup';
+
+// ★ 写入 localStorage 完整备份（同步操作，Zustand set() 中可直接调用）
+const writeCanvasBackup = (projects: any[]) => {
+  try {
+    localStorage.setItem(CANVAS_BACKUP_KEY, JSON.stringify(projects));
+  } catch (e) {
+    console.error("[Canvas Backup Error] localStorage 写入失败，可能数据过大：", e);
+  }
+};
+
 interface AppSettings {
   nickname: string;
   avatar: string;
@@ -50,11 +63,16 @@ export const useAppStore = create<AppState>()(
         const exists = (state.canvasProjects || []).find((p:any) => p.id === id);
         // ★ 支持函数式更新：调用方可传 function(prev) 读取原子快照，消除竞态条件
         const mergeData = typeof data === 'function' ? data(exists) : data;
+        let newProjects;
         if (exists) {
-          return { canvasProjects: state.canvasProjects.map((p: any) => p.id === id ? { ...p, ...mergeData, updatedAt: Date.now() } : p) };
+          newProjects = state.canvasProjects.map((p: any) => p.id === id ? { ...p, ...mergeData, updatedAt: Date.now() } : p);
         } else {
-          return { canvasProjects: [...(state.canvasProjects || []), { id, ...mergeData, updatedAt: Date.now() }] };
+          newProjects = [...(state.canvasProjects || []), { id, ...mergeData, updatedAt: Date.now() }];
         }
+        // ★ 救命底稿：每次画布变更都完整写入 localStorage（含 nodes/edges/localAssets）
+        // 确保即使云端同步失败、页面崩溃，刷新后也能从本地恢复完整画布
+        writeCanvasBackup(newProjects);
+        return { canvasProjects: newProjects };
       }),
       activeCanvasProjectId: null,
       isSettingsModalOpen: false,

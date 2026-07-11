@@ -67,7 +67,7 @@ export default function ChatPage() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
     // 提前声明文件状态，给聊天和工作流一起使用
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
-  const forceSyncToServer = () => {
+  const forceSyncToServer = async () => {
     if (!isAuthenticated || !hasLoadedFromServer) return;
     // ★ 直接从实时 ref 构建 payload，绕过防抖延迟
     const freshPayload = JSON.stringify({
@@ -79,11 +79,28 @@ export default function ChatPage() {
       canvasProjects: canvasProjectsRef.current
     });
     latestPayloadRef.current = freshPayload;
-    fetch(`${API_BASE}/v1/user/sync_sessions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('yr-ai-token')}` },
-      body: freshPayload
-    }).catch(e => console.error("Force sync failed", e));
+
+    // ★ 最多重试 3 次，指数退避（1s / 2s / 4s），保证数据成功写入云端
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = await fetch(`${API_BASE}/v1/user/sync_sessions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('yr-ai-token')}` },
+          body: freshPayload
+        });
+        if (res.ok) return; // 成功，退出
+        // 非 200 响应（如 500），等待后退避再试
+        if (attempt < 2) await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+      } catch(e) {
+        if (attempt < 2) {
+          await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        } else {
+          // ★ 3 次全部失败，弹 Toast 告知用户
+          console.error("[Sync Error] 3次重试均失败，画布数据可能未写入云端：", e);
+          useAppStore.getState().setToastMsg("⚠️ 云端同步失败，请检查网络！画布数据已保存在本地浏览器中。");
+        }
+      }
+    }
   };
     // 6. 引入聊天大脑
   const {
@@ -323,8 +340,21 @@ export default function ChatPage() {
         window.location.reload();
       }
     } catch (e) {
-      console.error("[Canvas Load Error] 画布数据加载失败，尝试使用本地缓存：", e);
-      setHasCanvasLoaded(true); // ★ 网络故障时允许画布继续使用本地缓存
+      console.error("[Canvas Load Error] 画布数据加载失败，尝试使用本地底稿：", e);
+      // ★ 兜底救急：从 localStorage 读取完整画布底稿（含 nodes/edges/localAssets）
+      try {
+        const backup = localStorage.getItem('yr-canvas-full-backup');
+        if (backup) {
+          const projects = JSON.parse(backup);
+          if (Array.isArray(projects) && projects.length > 0) {
+            useAppStore.setState({ canvasProjects: projects });
+            console.log("[Canvas Load] 已从本地底稿恢复画布数据，共", projects.length, "个项目");
+          }
+        }
+      } catch (backupErr) {
+        console.error("[Canvas Load Error] 本地底稿也读取失败：", backupErr);
+      }
+      setHasCanvasLoaded(true); // ★ 即使兜底也失败了，仍放行画布（让用户看到空画布至少能继续工作）
     }
   };
 
@@ -430,6 +460,10 @@ export default function ChatPage() {
   useEffect(() => { videoHistoryRef.current = videoHistory; }, [videoHistory]);
   useEffect(() => { wfSessionsRef.current = wfSessions; }, [wfSessions]);
    
+  // ★ 脏标记：任何数据变更时置 true，固定间隔同步器检测到后触发一次同步
+  const isDirtyRef = useRef(false);
+  useEffect(() => { isDirtyRef.current = true; }, [sessions, imageHistory, videoHistory, wfSessions, settings, canvasProjects]);
+   
 
   useEffect(() => { 
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
@@ -447,12 +481,19 @@ export default function ChatPage() {
     
     return () => { if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current); }
   }, [sessions, imageHistory, videoHistory, wfSessions, settings, canvasProjects]);
+  // ★ 固定间隔同步触发器：用户每次操作都会标记 isDirtyRef=true
+  // 定时器每 3 秒检查一次，有变更就触发同步。不再因持续编辑无限推迟同步
   useEffect(() => {
     if (isInitialized && isAuthenticated && hasLoadedFromServer) {
-      const syncTimer = setTimeout(() => { forceSyncToServer(); }, 5000); // ★ 延至5秒减少数据库写入压力
-      return () => clearTimeout(syncTimer);
+      const syncInterval = setInterval(() => {
+        if (isDirtyRef.current) {
+          isDirtyRef.current = false;
+          forceSyncToServer();
+        }
+      }, 3000);
+      return () => clearInterval(syncInterval);
     }
-  }, [sessions, imageHistory, videoHistory, wfSessions, settings, canvasProjects, isInitialized, isAuthenticated, hasLoadedFromServer]);
+  }, [isInitialized, isAuthenticated, hasLoadedFromServer]);
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (isAuthenticated && hasLoadedFromServer) {
@@ -560,22 +601,35 @@ export default function ChatPage() {
           settings,
           canvasProjects: canvasProjectsRef.current
         });
+        let syncOk = false;
         try {
-          await fetch(`${API_BASE}/v1/user/sync_sessions`, {
+          const res = await fetch(`${API_BASE}/v1/user/sync_sessions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('yr-ai-token')}` },
             body: freshPayload,
             keepalive: true
           });
-        } catch(e) { console.error("[Logout] 退出前同步失败", e); }
+          syncOk = res.ok;
+        } catch(e) { console.error("[Logout] 退出前同步请求失败", e); }
+        
+        // ★ 同步失败时拦截退出，告知用户风险
+        if (!syncOk) {
+          const forceQuit = await showConfirm(
+            "同步失败",
+            "云端保存失败，退出后画布数据将仅保留在浏览器本地。下次登录在其他设备上可能看不到最新修改。\n\n是否强制退出？（画布数据已自动保存在本地浏览器）",
+            "danger"
+          );
+          if (!forceQuit) return; // 用户取消退出
+        }
       }
       
       try { await fetch(`${API_BASE}/v1/logout`, { method: 'POST', headers: { 'Authorization': `Bearer ${localStorage.getItem('yr-ai-token')}` } }); } catch(e) {}
       // ★ 清除认证凭证
       localStorage.removeItem('yr-ai-token');
       localStorage.removeItem('yr-ai-role');
-      // ★ 清除画布缓存（sessionStorage），杜绝跨账号数据残留
+      // ★ 清除画布缓存（sessionStorage + localStorage 救命底稿），杜绝跨账号数据残留
       sessionStorage.removeItem('yr-canvas-storage');
+      localStorage.removeItem('yr-canvas-full-backup');
       // ★ 重置 Zustand App Store 到初始状态
       useAppStore.setState({
         canvasProjects: [],
