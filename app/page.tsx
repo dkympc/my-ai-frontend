@@ -33,9 +33,11 @@ export default function LandingPage() {
             topRatio = entry.intersectionRatio;
             topMost = entry.target.dataset.section || "";
           }
-          // ★ 入场动画：section 进入视口时添加 visible 类
+          // ★ 入场动画：进入视口加 visible 类，离开视口移除，保证每次进入都重播动画
           if (entry.isIntersecting) {
             entry.target.classList.add("section-visible");
+          } else {
+            entry.target.classList.remove("section-visible");
           }
         });
         if (topMost) setActiveSection(topMost);
@@ -134,32 +136,81 @@ export default function LandingPage() {
       <div className="fixed inset-0 z-0 pointer-events-none bg-[#010108]" />
 
       {/* ==================== 背景层 1：大月球 — 右边缘半圆 ==================== */}
-      {/* ★ 修复：外层 div 负责居中和定位，内层 div 只负责旋转，互不覆盖 */}
       <div className="fixed z-[1] pointer-events-none"
-        style={{ top: "50%", right: "-28vw", width: "72vw", height: "72vw", maxWidth: "960px", maxHeight: "960px", transform: "translateY(-50%)" }}>
+        style={{ top: "50%", right: "-20vw", width: "90vw", height: "90vw", maxWidth: "1200px", maxHeight: "1200px", transform: "translateY(-50%)", overflow: "visible" }}>
+        {/* 月球外围软光晕——消除边缘生硬感 */}
+        <div className="absolute rounded-full"
+          style={{
+            top: "-6%", left: "-6%", width: "112%", height: "112%",
+            background: "radial-gradient(circle at 50% 50%, rgba(45,45,55,0.22) 40%, rgba(20,20,30,0.1) 70%, transparent 100%)",
+            filter: "blur(40px)",
+          }} />
+        {/* 主体球体：高对比度纹理层 */}
         <div className="w-full h-full rounded-full relative"
           style={{
             background: `
-              radial-gradient(circle at 45% 40%, rgba(55,52,68,0.35) 0%, rgba(30,28,42,0.15) 40%, rgba(12,10,20,0.05) 70%, transparent 100%),
-              radial-gradient(ellipse at 38% 32%, rgba(140,135,160,0.18) 0%, transparent 35%),
-              radial-gradient(ellipse at 72% 65%, rgba(8,6,16,0.4) 0%, transparent 50%),
-              radial-gradient(circle at 25% 28%, rgba(70,65,85,0.2) 0%, transparent 18%),
-              radial-gradient(circle at 55% 35%, rgba(50,45,60,0.16) 0%, transparent 15%),
-              radial-gradient(circle at 40% 62%, rgba(65,58,78,0.18) 0%, transparent 20%),
-              radial-gradient(circle at 70% 45%, rgba(35,30,48,0.22) 0%, transparent 16%),
-              radial-gradient(circle at 60% 72%, rgba(60,52,72,0.15) 0%, transparent 14%),
-              radial-gradient(circle at 30% 50%, rgba(80,72,95,0.1) 0%, transparent 8%),
-              radial-gradient(circle at 48% 55%, rgba(55,48,68,0.12) 0%, transparent 7%),
-              radial-gradient(circle at 65% 25%, rgba(75,68,90,0.09) 0%, transparent 9%),
-              radial-gradient(circle at 22% 68%, rgba(68,60,82,0.11) 0%, transparent 7%),
-              radial-gradient(circle at 75% 58%, rgba(45,38,55,0.13) 0%, transparent 8%)
+              /* 球体基础色——冷灰蓝，匹配深空主色调 */
+              radial-gradient(circle at 50% 50%, rgba(62,64,74,0.45) 0%, rgba(38,39,48,0.55) 55%, rgba(16,17,25,0.85) 100%),
+              /* 月海暗斑区域——大块深色，视觉冲击力强 */
+              radial-gradient(ellipse at 30% 30%, rgba(3,3,10,0.95) 0%, transparent 25%),
+              radial-gradient(ellipse at 65% 70%, rgba(3,3,10,0.9) 0%, transparent 22%),
+              radial-gradient(ellipse at 58% 25%, rgba(4,3,11,0.85) 0%, transparent 20%),
+              radial-gradient(ellipse at 40% 50%, rgba(4,3,11,0.8) 0%, transparent 18%),
+              radial-gradient(ellipse at 72% 50%, rgba(5,4,12,0.75) 0%, transparent 15%),
+              /* 环形山高亮区域——点状白色，对比明显 */
+              radial-gradient(circle at 20% 62%, rgba(150,155,175,0.35) 0%, transparent 6%),
+              radial-gradient(circle at 42% 28%, rgba(145,150,172,0.3) 0%, transparent 5%),
+              radial-gradient(circle at 30% 52%, rgba(140,145,168,0.28) 0%, transparent 4.5%),
+              radial-gradient(circle at 55% 60%, rgba(148,153,175,0.25) 0%, transparent 4%),
+              radial-gradient(circle at 15% 40%, rgba(155,160,180,0.22) 0%, transparent 5.5%),
+              radial-gradient(circle at 48% 18%, rgba(150,155,176,0.2) 0%, transparent 4.5%),
+              /* 中等亮度过渡区域 */
+              radial-gradient(ellipse at 52% 58%, rgba(48,49,58,0.45) 0%, transparent 14%),
+              radial-gradient(ellipse at 38% 18%, rgba(52,53,62,0.35) 0%, transparent 12%),
+              radial-gradient(ellipse at 68% 38%, rgba(45,46,54,0.4) 0%, transparent 13%)
             `,
-            animation: "moonRotate 200s linear infinite",
-            filter: "blur(0.3px)",
+            animation: "moonRotate 55s linear infinite",
+            filter: "blur(0.2px)",
+          }} />
+        {/* 3D 球体光照遮罩——模拟球面高光与暗部，产生立体感 */}
+        <div className="absolute inset-0 rounded-full pointer-events-none"
+          style={{
+            background: "radial-gradient(circle at 32% 28%, rgba(220,225,240,0.18) 0%, rgba(140,145,160,0.06) 30%, rgba(30,32,42,0.35) 60%, rgba(8,9,16,0.72) 82%, rgba(2,2,6,0.96) 100%)",
+            boxShadow: "inset 0 0 120px rgba(0,2,8,0.5), inset 0 0 40px rgba(0,0,4,0.8)",
+          }} />
+        {/* 表面内层纹理：不同转速反向旋转，产生视差立体感 */}
+        <div className="absolute inset-0 rounded-full"
+          style={{
+            background: `
+              radial-gradient(circle at 55% 40%, rgba(170,175,195,0.12) 0%, transparent 7%),
+              radial-gradient(circle at 22% 35%, rgba(155,160,180,0.1) 0%, transparent 6%),
+              radial-gradient(circle at 72% 55%, rgba(148,153,172,0.09) 0%, transparent 5.5%),
+              radial-gradient(circle at 45% 65%, rgba(160,165,185,0.08) 0%, transparent 5%),
+              radial-gradient(ellipse at 32% 62%, rgba(35,36,44,0.4) 0%, transparent 16%),
+              radial-gradient(ellipse at 60% 28%, rgba(30,31,38,0.35) 0%, transparent 14%)
+            `,
+            animation: "moonRotate 65s linear infinite reverse",
           }} />
         {/* 月光晕：独立一层，不受旋转影响 */}
         <div className="absolute inset-0 rounded-full"
-          style={{ background: "radial-gradient(circle at 50% 50%, rgba(55,45,70,0.04) 35%, transparent 70%)", filter: "blur(140px)", transform: "scale(1.5)" }} />
+          style={{ background: "radial-gradient(circle at 50% 50%, rgba(40,40,50,0.05) 35%, transparent 70%)", filter: "blur(160px)", transform: "scale(1.6)" }} />
+      </div>
+
+      {/* ==================== 背景层 1.5：左侧散射光——填补空白 ==================== */}
+      <div className="fixed z-[1] pointer-events-none" style={{ top: "0%", left: "-5vw", width: "55vw", height: "100vh" }}>
+        <div style={{
+          width: "100%", height: "100%",
+          background: "radial-gradient(ellipse at 25% 50%, rgba(50,55,70,0.08) 0%, rgba(40,45,60,0.04) 45%, transparent 75%)",
+          filter: "blur(200px)",
+        }} />
+      </div>
+      {/* 左上角额外光点——进一步丰富左侧 */}
+      <div className="fixed z-[1] pointer-events-none" style={{ top: "8%", left: "8%", width: "30vw", height: "30vh", maxWidth: "400px", maxHeight: "300px" }}>
+        <div style={{
+          width: "100%", height: "100%",
+          background: "radial-gradient(ellipse at 40% 60%, rgba(80,85,100,0.06) 0%, transparent 70%)",
+          filter: "blur(120px)",
+        }} />
       </div>
 
       {/* ==================== 背景层 2：浮动粒子（suppressHydrationWarning 避 SSR 随机值差异） ==================== */}
@@ -227,7 +278,7 @@ export default function LandingPage() {
           className="snap-section flex flex-col items-center justify-center text-center h-screen px-6">
           <div className="section-reveal section-reveal-d1 inline-flex items-center gap-2 px-5 py-2 rounded-full mb-14 text-[12px] tracking-[0.28em] font-light"
             style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", color: "rgba(170,180,200,0.5)" }}>
-            <Star size={12} className="text-zinc-600" /> AI 驱动的影视创作平台
+            <Star size={12} className="text-zinc-600" /> 一站式影视AGI
           </div>
           <h1 className="section-reveal section-reveal-d2 text-8xl md:text-[9rem] lg:text-[11rem] font-thin tracking-[0.01em] text-white mb-12 select-none leading-none"
             style={{ textShadow: "0 0 140px rgba(170,175,200,0.2), 0 0 280px rgba(140,150,180,0.08)" }}>
@@ -278,7 +329,7 @@ export default function LandingPage() {
               </div>
               <h2 className="section-reveal section-reveal-d2 text-4xl md:text-6xl font-light text-white tracking-[0.05em] mb-8 leading-tight">半自动化<br />分镜引擎</h2>
               <p className="section-reveal section-reveal-d3 text-sm md:text-base text-zinc-500 leading-relaxed font-light mb-10 max-w-lg">
-                输入剧本，一键裂变生成完整分镜序列。AI 自动切分镜头、分配时长、推断光影、翻译首帧生图咒语。从文字到可视化分镜，不再需要逐帧手绘。
+                输入剧本，一键生成完整分镜。AI 自动拆解镜头、计算时长、推断光影，每个分镜直接输出可用的生图提示词。从文字到画面，告别逐帧手绘。
               </p>
               <div className="section-reveal section-reveal-d3 flex flex-wrap gap-3">
                 {["导演引擎", "裂变分镜", "资产表格"].map((tag) => (
@@ -302,12 +353,12 @@ export default function LandingPage() {
               </div>
               <h2 className="section-reveal section-reveal-d2 text-4xl md:text-6xl font-light text-white tracking-[0.05em] mb-8 leading-tight">三权分立<br />大师级分镜管线</h2>
               <p className="section-reveal section-reveal-d3 text-sm md:text-base text-zinc-500 leading-relaxed font-light mb-8 max-w-lg">
-                独创双阶段架构：阶段1「大师分镜师」统管调度与光影推演，阶段2「首帧画师」被彻底物理隔离，100% 照抄光影结果，严守 8 大静态物理铁律，杜绝 AI 幻觉。
+                独创双阶段架构：调度层统一规划光影、节奏、镜头语言；执行层严格按调度结果生成画面，两层互不干扰，彻底杜绝 AI 随意发挥。
               </p>
               <div className="section-reveal section-reveal-d3 space-y-4 text-sm text-zinc-600 font-light tracking-[0.06em]">
-                <div className="flex items-start gap-4"><span className="text-zinc-500 text-xs mt-0.5 w-6">01</span><span>时长数学红线：对白字数 ÷ 3.5 = 最短秒数</span></div>
-                <div className="flex items-start gap-4"><span className="text-zinc-500 text-xs mt-0.5 w-6">02</span><span>三级降级光影法则：资产表继承 → 导演规则 → 景别裁切</span></div>
-                <div className="flex items-start gap-4"><span className="text-zinc-500 text-xs mt-0.5 w-6">03</span><span>8 大静态物理铁律：空间站位 / 轴线死锁 / 防运镜污染 ...</span></div>
+                <div className="flex items-start gap-4"><span className="text-zinc-500 text-xs mt-0.5 w-6">01</span><span>智能时长：根据对白密度自动计算每个镜头的合理秒数</span></div>
+                <div className="flex items-start gap-4"><span className="text-zinc-500 text-xs mt-0.5 w-6">02</span><span>光影兜底：角色设定 → 导演意图 → 镜头景别，三层逐级校对</span></div>
+                <div className="flex items-start gap-4"><span className="text-zinc-500 text-xs mt-0.5 w-6">03</span><span>物理级严谨：空间关系、人物站位、运动方向始终一致，像实拍一样</span></div>
               </div>
             </div>
             <div className="section-reveal section-reveal-d2 flex justify-center">
@@ -315,9 +366,8 @@ export default function LandingPage() {
                 <div className="absolute left-0 w-[44%] rounded-2xl p-8"
                   style={{ background: "linear-gradient(170deg, rgba(28,28,42,0.7), rgba(8,8,20,0.9))", border: "1px solid rgba(255,255,255,0.06)", boxShadow: "0 25px 60px rgba(0,0,0,0.45)" }}>
                   <Cpu size={26} className="text-zinc-500 mb-4" />
-                  <div className="text-sm text-white/60 tracking-[0.18em] font-light mb-2">阶段 1</div>
-                  <div className="text-base text-zinc-300 font-light">大师分镜师</div>
-                  <div className="text-xs text-zinc-600 mt-2">统管调度 · 光影推演</div>
+                  <div className="text-sm text-white/60 tracking-[0.18em] font-light mb-2">① 调度层</div>
+                  <div className="text-base text-zinc-300 font-light">统筹光影与节奏</div>
                 </div>
                 <div className="absolute left-[42%] w-[16%] flex items-center justify-center">
                   <ArrowRight size={20} className="text-zinc-600" />
@@ -325,9 +375,8 @@ export default function LandingPage() {
                 <div className="absolute right-0 w-[44%] rounded-2xl p-8"
                   style={{ background: "linear-gradient(170deg, rgba(22,22,36,0.7), rgba(6,6,18,0.9))", border: "1px solid rgba(255,255,255,0.05)", boxShadow: "0 25px 60px rgba(0,0,0,0.45)" }}>
                   <Image size={26} className="text-zinc-500 mb-4" />
-                  <div className="text-sm text-white/60 tracking-[0.18em] font-light mb-2">阶段 2</div>
-                  <div className="text-base text-zinc-300 font-light">首帧画师</div>
-                  <div className="text-xs text-zinc-600 mt-2">翻译咒语 · 8 大铁律</div>
+                  <div className="text-sm text-white/60 tracking-[0.18em] font-light mb-2">② 执行层</div>
+                  <div className="text-base text-zinc-300 font-light">严格按指令出图</div>
                 </div>
               </div>
             </div>
@@ -345,10 +394,10 @@ export default function LandingPage() {
                   <Globe size={32} className="text-zinc-500" />
                 </div>
                 {[
-                  { label: "布光字典", sub: "38 种", x: "6%", y: "10%" },
-                  { label: "运镜字典", sub: "50+ 项", x: "66%", y: "10%" },
-                  { label: "题材预设", sub: "18 个", x: "6%", y: "66%" },
-                  { label: "安全突变", sub: "10 种", x: "66%", y: "66%" },
+                  { label: "布光字典", sub: "100+ 种", x: "6%", y: "10%" },
+                  { label: "运镜字典", sub: "60+ 项", x: "66%", y: "10%" },
+                  { label: "题材预设", sub: "20+ 个", x: "6%", y: "66%" },
+                  { label: "安全突变", sub: "15+ 种", x: "66%", y: "66%" },
                 ].map((node) => (
                   <div key={node.label} className="absolute w-24 h-24 rounded-xl flex flex-col items-center justify-center gap-1"
                     style={{ left: node.x, top: node.y, background: "linear-gradient(135deg, rgba(30,30,46,0.8), rgba(8,8,20,0.9))", border: "1px solid rgba(255,255,255,0.05)", boxShadow: "0 12px 35px rgba(0,0,0,0.4)" }}>
@@ -371,7 +420,7 @@ export default function LandingPage() {
               </div>
               <h2 className="section-reveal section-reveal-d2 text-4xl md:text-6xl font-light text-white tracking-[0.05em] mb-8 leading-tight">导演路由<br />引擎</h2>
               <p className="section-reveal section-reveal-d3 text-sm md:text-base text-zinc-500 leading-relaxed font-light mb-8 max-w-lg">
-                18 个题材 × 4 级节奏，自由混搭。内置 4 大规则仓库，自动注入英文极品光影咒语、运镜策略、色彩调色板。10% 概率触发安全突变，为分镜注入不可预测的电影感。
+                覆盖主流影视题材与多档节奏，自由混搭。内置光影字典、运镜策略、色彩调色板，自动为每个分镜注入专业级的英文光影咒语。画面风格不死板、不重复，每个镜头都有独特的电影质感。
               </p>
               <div className="section-reveal section-reveal-d3 grid grid-cols-2 gap-3 max-w-sm">
                 {[
@@ -500,7 +549,7 @@ export default function LandingPage() {
               </div>
               <h2 className="section-reveal section-reveal-d2 text-4xl md:text-6xl font-light text-white tracking-[0.05em] mb-8 leading-tight">AI 对话 &<br />工作流引擎</h2>
               <p className="section-reveal section-reveal-d3 text-sm md:text-base text-zinc-500 leading-relaxed font-light mb-8 max-w-lg">
-                SSE 流式对话，支持联网搜索、文件附件上传。内置 10+ 预置工作流：剧本分镜、拆帧分析、文案生成等。多模型切换，所有会话云端同步。
+                内置丰富预置工作流与智能体：剧本分镜、拆帧分析、文案生成……多模型一键切换，所有会话自动云端同步。
               </p>
               <div className="section-reveal section-reveal-d3 grid grid-cols-2 gap-2.5 max-w-xs">
                 {["剧本分镜", "拆帧分析", "文案生成", "联网搜索", "文件附件", "多模型切换"].map((w) => (
