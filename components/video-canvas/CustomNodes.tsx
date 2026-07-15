@@ -82,7 +82,7 @@ const ZenEditor = ({ value, onChange, label, onClose, placeholder, onWheelCaptur
 };
 
 import { useAppStore } from '@/store/useAppStore'; 
-import { useCanvasEngine } from '@/hooks/useCanvasEngine';
+import { useCanvasEngine, buildImagePayload } from '@/hooks/useCanvasEngine';
 
 // ✨ 多模型差异化分辨率动态选项生成器
 // 依据后端及 useCanvasEngine.ts 所设定的参数进行严格物理对齐，防止因比例/精度不符导致 400 报错
@@ -409,10 +409,12 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
       const existingTablesCount = getNodes().filter(n => n.type === 'assetTable').length;
       
       const newNodeId = `asset_table_${type}_${Date.now()}`;
+      // ★ 继承全局比例设置，确保资产表默认比例与中控台一致
+      const inheritedRatio = useAppStore.getState().canvasSettings.globalRatio || '16:9';
       const newTableNode = {
         id: newNodeId, type: 'assetTable',
         position: { x: baseX + 650, y: baseY - 100 + (existingTablesCount * 450) },
-        data: { assetType: type, rows: finalRows } // 直接传入组装好的 finalRows，不再传 globalCamera 给表头
+        data: { assetType: type, rows: finalRows, ratio: inheritedRatio } // 继承全局比例 + 组装好的 finalRows
       };
 
       const newEdge = { 
@@ -470,9 +472,9 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
         : null;
 
       // ==========================================
-      // 管道 1: 视频分镜拆解
+      // 🚀 工业级管道 1: 视频分镜拆解 (100% 满血还原，绝不删减)
       // ==========================================
-      useAppStore.getState().setToastMsg("第 1/2 步：正在分析剧本，拆解分镜...");
+      useAppStore.getState().setToastMsg("阶段 1/2：正在执行工业级分镜拆解 (运镜与时序推断)...");
       const payloadStage1 = {
         model: targetModel,
         messages: [
@@ -597,9 +599,9 @@ ${directorCtx?.llmContextBlock || ''}`
       if (!json1.shots) throw new Error("大模型返回的数据缺少 shots 字段");
 
       // ==========================================
-      // 管道 2: 首帧静帧提取
+      // 🚀 工业级管道 2: 首帧静帧提取 (融合《依然拆帧》+《六大铁律》)
       // ==========================================
-      useAppStore.getState().setToastMsg("第 2/2 步：正在为每个分镜生成画面提示词...");
+      useAppStore.getState().setToastMsg("阶段 2/2：正在提炼顶级生图咒语 (光影注入与空间锚定)...");
       const payloadStage2 = {
         model: targetModel,
         messages: [
@@ -686,15 +688,33 @@ ${directorCtx?.llmContextBlock || ''}`
       const thisNode = getNodes().find(n => n.id === id);
       const baseX = thisNode ? thisNode.position.x : 0;
       const baseY = thisNode ? thisNode.position.y : 0;
-      // ✨ 痛点修复：拉开 X 轴距离，防止覆盖主卡片
-      const targetColumnX = baseX + 850; 
-      
-      let maxBottomY = baseY - 50; 
-      getNodes().forEach(n => {
-         if (Math.abs(n.position.x - targetColumnX) < 150) {
-            const bottom = n.position.y + (n.measured?.height || 500);
-            if (bottom > maxBottomY) maxBottomY = bottom;
-         }
+
+      // ★★★ 智能列布局：不同裂变批次自动排列到不同列，永不重叠
+      // 扫描画布上所有已有 ShotNode，按 X 坐标归列（X差 < 200px 算同一列）
+      const allShotNodes = existingShots; // 复用上方已声明的 existingShots
+      const columns: number[] = []; // 每列的 X 坐标中位数
+      allShotNodes.forEach(n => {
+        // 检查是否属于已存在的列
+        const foundCol = columns.find(colX => Math.abs(n.position.x - colX) < 200);
+        if (!foundCol) columns.push(n.position.x);
+      });
+      // 新批次排到下一列
+      const colIndex = columns.length;
+      const targetColumnX = baseX + 850 + colIndex * 650;
+
+      // 计算该列的 Y 起始位置（取该列最底部节点的 bottom）
+      let maxBottomY = baseY - 50;
+      allShotNodes.forEach(n => {
+        if (Math.abs(n.position.x - targetColumnX) < 200) {
+          // 优先使用 React Flow 测量的真实高度，回退取 DOM 实际高度，再不行用预估 560px
+          let height = n.measured?.height;
+          if (!height) {
+            const el = document.querySelector(`[data-id="${n.id}"]`) as HTMLElement;
+            height = el?.offsetHeight || 560;
+          }
+          const bottom = n.position.y + height;
+          if (bottom > maxBottomY) maxBottomY = bottom;
+        }
       });
       
       let newNodes: any[] = [];
@@ -853,18 +873,17 @@ ${directorCtx?.llmContextBlock || ''}`
       
       <Handle type="source" position={Position.Right} id="right" className={handleRight} />
       
-      <div className={`w-full h-full flex-1 ${nodeBaseClass} ${selected ? selectedBorderClass : unselectedBorderClass} flex flex-col p-5 overflow-hidden relative bg-[#0a0a0c]/95`}>
+      <div className={`w-full h-full flex-1 ${nodeBaseClass} ${selected ? selectedBorderClass : unselectedBorderClass} flex flex-col p-5 overflow-hidden relative`}>
         
-       <div className="flex items-center gap-3 mb-4 border-b border-white/[0.06] pb-3 shrink-0">
-           <div className="w-8 h-8 rounded-[10px] bg-white/[0.06] border border-white/[0.08] flex items-center justify-center shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)] pointer-events-none">
-             <Type size={14} className="text-white/80" />
-           </div>
-           <div className="flex flex-col pointer-events-none">
-             <span className="text-[14px] font-bold text-white tracking-widest">主剧本控制台</span>
-             <span className="text-[9px] text-zinc-600 font-mono tracking-wider mt-0.5">MASTER SCRIPT</span>
-           </div>
-           {/* 批量操作已移至各节点独立控制 */}
-           
+      <div className="flex items-center gap-3 mb-4 border-b border-white/[0.05] pb-3 shrink-0">
+          <div className="w-8 h-8 rounded-[10px] bg-white/10 border border-white/20 flex items-center justify-center shadow-[inset_0_1px_1px_rgba(255,255,255,0.2)] pointer-events-none">
+            <Type size={14} className="text-white" />
+          </div>
+          <div className="flex flex-col pointer-events-none">
+            <span className="text-[14px] font-bold text-white tracking-widest">主剧本控制台</span>
+            <span className="text-[9px] text-zinc-500 font-mono tracking-wider mt-0.5">MASTER SCRIPT 2.1</span>
+          </div>
+          
           {(data.extractedScenes && data.extractedScenes.length > 0) && (
             <button 
               onClick={(e) => { e.stopPropagation(); setShowBookmarks(!showBookmarks); }}
@@ -879,7 +898,7 @@ ${directorCtx?.llmContextBlock || ''}`
             <div className="relative ml-2">
               <button 
                 onClick={(e) => { e.stopPropagation(); setShowAssetMenu(!showAssetMenu); setShowBookmarks(false); }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[10px] font-bold tracking-widest transition-all shadow-md nodrag ${showAssetMenu || extractingAsset ? 'bg-white/15 border-white/25 text-white' : 'bg-white/5 border-white/10 text-zinc-400 hover:bg-white/10 hover:text-white'}`}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[10px] font-bold tracking-widest transition-all shadow-md nodrag ${showAssetMenu || extractingAsset ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-300' : 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400/70 hover:bg-indigo-500/20 hover:text-indigo-300'}`}
               >
                 {extractingAsset ? <Loader2 size={12} className="animate-spin"/> : <Database size={12} />}
                 前置资产建档 <ChevronDown size={12} className={showAssetMenu ? "rotate-180 transition-transform" : "transition-transform"}/>
@@ -897,15 +916,15 @@ ${directorCtx?.llmContextBlock || ''}`
         </div>
 
         {data.globalCamera && (
-           <div className="mb-4 p-3 bg-[#050508]/90 rounded-[16px] border border-white/[0.06] shadow-inner shrink-0 group/cam transition-all">
-              <div className="flex flex-col">
-              <label className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest mb-1.5 pl-1 flex items-center justify-between pointer-events-none">
-                  全局摄影机预设 <Settings2 size={12} className="text-zinc-600 group-hover/cam:rotate-90 transition-transform duration-500"/>
-                </label>
-                <textarea 
-                  className="bg-transparent border border-white/[0.04] rounded-[8px] p-2 focus:border-white/20 focus:bg-white/[0.02] text-[12px] text-zinc-300 outline-none w-full font-mono transition-colors nodrag nopan resize-none custom-scrollbar"
-                  rows={3} value={data.globalCamera} onChange={(e) => updateNodeData(id, { globalCamera: e.target.value })} onWheelCapture={(e) => { if (!e.ctrlKey && !e.metaKey) e.stopPropagation(); }}
-                />
+          <div className="mb-4 p-3 bg-black/50 rounded-[16px] border border-white/10 shadow-inner shrink-0 group/cam transition-all">
+             <div className="flex flex-col">
+             <label className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5 pl-1 flex items-center justify-between pointer-events-none">
+                 全局摄影机预设 (Global Camera) <Settings2 size={12} className="text-zinc-400 group-hover/cam:rotate-90 transition-transform duration-500"/>
+               </label>
+               <textarea 
+                 className="bg-transparent border border-white/[0.05] rounded-[8px] p-2 focus:border-white/30 focus:bg-white/[0.02] text-[12px] text-zinc-300 outline-none w-full font-mono transition-colors nodrag nopan resize-none custom-scrollbar"
+                 rows={3} value={data.globalCamera} onChange={(e) => updateNodeData(id, { globalCamera: e.target.value })} onWheelCapture={(e) => { if (!e.ctrlKey && !e.metaKey) e.stopPropagation(); }}
+               />
              </div>
           </div>
         )}
@@ -963,12 +982,12 @@ ${directorCtx?.llmContextBlock || ''}`
 
 
       {/* 下方的场记板拦截舱 (直接无脑裂变版) */}
-      <div className={`absolute bottom-[-20px] left-1/2 -translate-x-1/2 translate-y-full flex flex-col bg-[#050505]/98 backdrop-blur-3xl border border-white/[0.08] rounded-[24px] shadow-[0_40px_100px_rgba(0,0,0,0.95)] transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] z-[100] ${(!data.globalCamera || selectedText ? 'w-auto p-1.5 flex-row items-center gap-2 scale-100 opacity-100' : 'scale-90 opacity-0 pointer-events-none')}`}>
+      <div className={`absolute bottom-[-20px] left-1/2 -translate-x-1/2 translate-y-full flex flex-col bg-[#0a0a0c]/95 backdrop-blur-3xl border border-white/[0.1] rounded-[24px] shadow-[0_40px_100px_rgba(0,0,0,0.95)] transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] z-[100] ${(!data.globalCamera || selectedText ? 'w-auto p-1.5 flex-row items-center gap-2 scale-100 opacity-100' : 'scale-90 opacity-0 pointer-events-none')}`}>
         {!data.globalCamera ? (
           <>
             <CustomSelect menuPosition="left" className="w-[170px] bg-transparent" value={data.model || 'deepseek-v4-pro'} options={[{ value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' }, { value: 'gpt-5.4', label: 'GPT-5.4 (智能)' }, { value: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro' }, { value: 'gemini-3.5-flash', label: 'Gemini 3.5' }]} onChange={(v: string) => updateNodeData(id, { model: v })} />
             <div className="w-px h-5 bg-white/10 mx-1"></div>
-            <button onClick={handleExtractCamera} disabled={data.isExtractingCamera} className="flex items-center justify-center gap-2 px-5 py-2 border border-white/10 bg-white/5 text-zinc-300 hover:bg-white/10 hover:text-white rounded-[12px] text-[12px] font-bold transition-all shadow-md whitespace-nowrap nodrag">
+            <button onClick={handleExtractCamera} disabled={data.isExtractingCamera} className="flex items-center justify-center gap-2 px-5 py-2 bg-indigo-500 text-white hover:bg-indigo-400 rounded-[12px] text-[12px] font-bold transition-all shadow-[0_0_20px_rgba(99,102,241,0.4)] whitespace-nowrap nodrag">
                {data.isExtractingCamera ? <Loader2 size={14} className="animate-spin" /> : <Settings2 size={14} />} 锚定全片摄影机
             </button>
           </>
@@ -977,8 +996,8 @@ ${directorCtx?.llmContextBlock || ''}`
             <CustomSelect menuPosition="left" className="w-[170px] bg-transparent" value={data.model || 'deepseek-v4-pro'} options={[{ value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' }, { value: 'gpt-5.4', label: 'GPT-5.4 (智能)' }, { value: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro' }, { value: 'gemini-3.5-flash', label: 'Gemini 3.5' }]} onChange={(v: string) => updateNodeData(id, { model: v })} />
             <div className="w-px h-5 bg-white/10 mx-1"></div>
             
-            <button onClick={handleFissionShots} disabled={data.isGenerating} className="flex items-center gap-1.5 px-6 py-2 text-[12px] font-bold text-black bg-white hover:bg-zinc-200 rounded-[12px] transition-all shadow-[0_0_15px_rgba(255,255,255,0.3)] nodrag whitespace-nowrap">
-               {data.isGenerating ? <Loader2 size={14} className="animate-spin" /> : <Layers size={14} />} 裂变分镜 ({selectedText.length}字)
+            <button onClick={handleFissionShots} disabled={data.isGenerating} className="flex items-center gap-1.5 px-6 py-2 text-[12px] font-bold text-white bg-indigo-500 hover:bg-indigo-400 rounded-[12px] transition-all shadow-[0_0_20px_rgba(99,102,241,0.5)] nodrag whitespace-nowrap">
+              {data.isGenerating ? <Loader2 size={14} className="animate-spin" /> : <Layers size={14} />} 裂变分镜 ({selectedText.length}字)
             </button>
             <button onClick={handleFissionTable} disabled={data.isGenerating} className="flex items-center gap-1.5 px-6 py-2 text-[12px] font-bold text-black bg-white hover:bg-zinc-200 hover:scale-105 rounded-[12px] transition-all shadow-[0_0_15px_rgba(255,255,255,0.3)] nodrag whitespace-nowrap">
               {data.isGenerating ? <Loader2 size={14} className="animate-spin" /> : <Table size={14} />} 生成表格
@@ -1239,7 +1258,7 @@ export const ShotNode = ({ id, data, selected }: any) => {
           {showHDSettings && (
             <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 bg-[#0a0a0c]/95 backdrop-blur-3xl border border-white/10 rounded-[16px] p-4 z-[150] shadow-2xl flex flex-col gap-3 min-w-[220px] animate-in fade-in slide-in-from-top-2">
               <div className="text-white text-[12px] font-bold flex items-center gap-2">
-                <Maximize size={14} className="text-zinc-400"/> 高清放大
+                <Maximize size={14} className="text-indigo-400"/> 高清放大
               </div>
               <div className="flex flex-col gap-2 text-[11px] text-zinc-300">
                 <div className="flex justify-between"><span className="text-zinc-500">模型</span><span className="font-mono">hd-upscale-v1</span></div>
@@ -1247,7 +1266,7 @@ export const ShotNode = ({ id, data, selected }: any) => {
               </div>
               <div className="flex gap-2 justify-end mt-1">
                 <button onClick={() => setShowHDSettings(true)} className="px-3 py-1.5 rounded-full bg-white/5 text-zinc-300 text-[10px] font-bold hover:bg-white/10 transition-all">取消</button>
-                <button onClick={handleHDConfirm} className="px-4 py-1.5 rounded-full bg-white text-black text-[10px] font-bold hover:bg-zinc-200 transition-all shadow-lg">确认放大</button>
+                <button onClick={handleHDConfirm} className="px-4 py-1.5 rounded-full bg-indigo-500 text-white text-[10px] font-bold hover:bg-indigo-400 transition-all shadow-lg">确认放大</button>
               </div>
             </div>
           )}
@@ -1272,13 +1291,13 @@ export const ShotNode = ({ id, data, selected }: any) => {
             </div>
           </div>
           
-          <button onClick={(e) => { e.stopPropagation(); forceDownload(data.frameUrl, `YR_Shot_${Date.now()}.png`); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] text-[11px] font-bold text-zinc-300 hover:text-black hover:bg-white transition-all shadow-md whitespace-nowrap"><Download size={12}/> 下载</button>
+          <button onClick={(e) => { e.stopPropagation(); const a = document.createElement('a'); a.href = data.frameUrl; a.download = `YR_Shot_${Date.now()}.png`; a.click(); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] text-[11px] font-bold text-zinc-300 hover:text-black hover:bg-white transition-all shadow-md whitespace-nowrap"><Download size={12}/> 下载</button>
         </div>
       )}
       
       {zenMode && <ZenEditor label={zenMode.label} value={data[zenMode.field] || ''} onChange={(val: string) => updateNodeData(id, { [zenMode.field]: val })} onClose={() => setZenMode(null)} />}
 
-      <div className={`relative rounded-[24px] bg-[#0a0a0c]/95 backdrop-blur-3xl border ${selected ? 'border-white/30 shadow-2xl' : 'border-white/[0.08]'} flex flex-col p-2 transition-all duration-500`}>
+      <div className={`relative rounded-[24px] bg-[#18181b]/80 backdrop-blur-3xl border ${selected ? 'border-white/30 shadow-2xl' : 'border-white/[0.08]'} flex flex-col p-2 transition-all duration-500`}>
         <div className="flex items-center justify-between px-2 pt-1 pb-2">
           <span className="bg-white/10 text-white px-2 py-0.5 rounded-[6px] text-[10px] font-mono font-bold shadow-inner">SHOT {data.shotNumber}</span>
         </div>
@@ -1289,7 +1308,7 @@ export const ShotNode = ({ id, data, selected }: any) => {
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm z-10">
               <Loader2 size={24} className="animate-spin text-zinc-400 mb-2" />
               <span className="text-[10px] text-zinc-400 uppercase tracking-widest font-bold animate-pulse">
-                {status === 'pending' ? '排队等待中...' : '正在生成...'}
+                {status === 'pending' ? 'QUEUED / 排队中...' : 'Rendering...'}
               </span>
             </div>
           )}
@@ -1400,7 +1419,7 @@ export const ShotNode = ({ id, data, selected }: any) => {
       </div>
 
       <div className={`absolute top-[100%] pt-4 left-1/2 -translate-x-1/2 w-[540px] transition-all duration-500 ease-out origin-top ${selected ? 'opacity-100 scale-100 pointer-events-auto' : 'opacity-0 scale-95 pointer-events-none'}`}>
-         <div className="bg-[#050508]/95 border border-white/[0.06] backdrop-blur-3xl rounded-[32px] p-4 shadow-2xl flex flex-col relative">
+         <div className="bg-black/60 border border-white/[0.08] backdrop-blur-3xl rounded-[32px] p-4 shadow-2xl flex flex-col relative">
             
          <div className="flex flex-col gap-1.5 mb-3 bg-[#050505]/50 p-2.5 rounded-[16px] border border-white/5 focus-within:border-white/20 transition-colors shadow-inner">
                <label className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">场景光影轨</label>
@@ -1414,7 +1433,7 @@ export const ShotNode = ({ id, data, selected }: any) => {
                     {data.styleOverride && data.styleOverride !== '继承全局预设' && <span className="bg-white/10 text-white px-1.5 py-0.5 rounded text-[8px] font-mono border border-white/20">STYLE: {data.styleOverride.split(' ')[0]}</span>}
                  </label>
                  <div className="flex items-center gap-1">
-                    <button onClick={() => setShowAssetDropdown(!showAssetDropdown)} className="flex items-center gap-1 px-1.5 py-0.5 border border-white/10 bg-white/5 text-zinc-400 hover:bg-white/10 hover:text-white rounded-[6px] text-[9px] font-bold transition-all nodrag"><Plus size={10}/> 引入资产</button>
+                    <button onClick={() => setShowAssetDropdown(!showAssetDropdown)} className="flex items-center gap-1 px-1.5 py-0.5 bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/40 rounded-[6px] text-[9px] font-bold transition-all nodrag"><Plus size={10}/> 引入资产</button>
                     <button onClick={() => setZenMode({ field: 'firstFrameAnchor', label: '首帧描述' })} className="opacity-0 group-hover/zen1:opacity-100 text-zinc-400 hover:text-white transition-colors p-1"><Expand size={10}/></button>
                  </div>
                  
@@ -1497,7 +1516,7 @@ export const ShotNode = ({ id, data, selected }: any) => {
 />
                  
                  <div className="relative group/cfg">
-                    <button onClick={() => setShowConfig(!showConfig)} className={`p-2 rounded-[10px] transition-all nodrag ${showConfig ? 'bg-white text-black' : 'bg-white/5 text-zinc-400 hover:text-white'}`}><Settings2 size={16}/></button>
+                    <button onClick={() => setShowConfig(!showConfig)} className={`p-2 rounded-[10px] transition-all nodrag ${showConfig ? 'bg-indigo-500 text-white' : 'bg-white/5 text-zinc-400 hover:text-white'}`}><Settings2 size={16}/></button>
                     {showConfig && (
                        <div className="absolute bottom-[calc(100%+10px)] left-0 w-[240px] bg-[#0a0a0c]/95 backdrop-blur-3xl border border-white/10 rounded-[16px] shadow-2xl p-3 z-50 flex flex-col gap-3 animate-in fade-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
                           <div className="flex flex-col gap-1">
@@ -1528,20 +1547,20 @@ export const ShotNode = ({ id, data, selected }: any) => {
                </div>
 
                <div className="flex gap-2">
-                  <button 
-                    onClick={handleGenerateFrame} 
-                    disabled={data.isGenerating || status === 'pending'} 
-                    className="h-10 px-6 rounded-full border border-white/20 bg-white/[0.06] text-white text-[12px] font-bold backdrop-blur-sm hover:bg-white/10 hover:border-white/30 shadow-lg transition-all nodrag disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed"
-                  >
-                    {status === 'done' ? '重新生成' : '提取生成首帧'}
-                  </button>
-                  <button 
-                    onClick={handleSpawnVideo} 
-                    disabled={status !== 'done'} 
-                    className="flex items-center gap-1.5 h-10 px-5 rounded-full border border-white/10 bg-white/5 text-zinc-300 hover:bg-white/10 hover:text-white text-[12px] font-bold shadow-md transition-all nodrag disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    <Film size={14}/> 传给3级渲染
-                  </button>
+                 <button 
+                   onClick={handleGenerateFrame} 
+                   disabled={data.isGenerating || status === 'pending'} 
+                   className="h-10 px-6 rounded-full bg-white text-black text-[12px] font-bold shadow-lg hover:scale-105 nodrag disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed"
+                 >
+                   {status === 'done' ? '重新生成' : '提取生成首帧'}
+                 </button>
+                 <button 
+                   onClick={handleSpawnVideo} 
+                   disabled={status !== 'done'} 
+                   className="flex items-center gap-1.5 h-10 px-5 rounded-full bg-indigo-500 text-white text-[12px] font-bold shadow-lg hover:bg-indigo-400 nodrag disabled:opacity-40 disabled:hover:bg-indigo-500 disabled:cursor-not-allowed"
+                 >
+                   <Film size={14}/> 传给3级渲染
+                 </button>
                </div>
             </div>
          </div>
@@ -1701,7 +1720,7 @@ export const VideoClipNode = ({ id, data, selected }: any) => {
           {/* ✨ 下面这行是新加的存资产按钮 */}
           <button onClick={handleSaveAsset} className="flex items-center gap-1.5 px-3 py-1 rounded-[10px] text-[11px] font-medium text-zinc-400 hover:text-white hover:bg-white/10 transition-colors whitespace-nowrap"><RefreshCcw size={12}/> 存资产</button>
           
-          <button onClick={(e) => { e.stopPropagation(); forceDownload(data.videoUrl, `YR_Video_${Date.now()}.mp4`); }} className="flex items-center gap-1.5 px-3 py-1 rounded-[10px] text-[11px] font-bold text-zinc-300 hover:text-black hover:bg-white transition-all shadow-md whitespace-nowrap">
+          <button onClick={(e) => { e.stopPropagation(); const a = document.createElement('a'); a.href = data.videoUrl; a.download = `YR_Video_${Date.now()}.mp4`; a.click(); }} className="flex items-center gap-1.5 px-3 py-1 rounded-[10px] text-[11px] font-bold text-zinc-300 hover:text-black hover:bg-white transition-all shadow-md whitespace-nowrap">
             <Download size={12}/> 下载
           </button>
         </div>
@@ -1753,7 +1772,7 @@ export const VideoClipNode = ({ id, data, selected }: any) => {
               </div>
               <div className="w-px h-3 bg-white/10 mx-0.5"></div>
               <button 
-                onClick={(e) => { e.stopPropagation(); forceDownload(data.videoUrl, `YR_Video_${Date.now()}.mp4`); }} 
+                onClick={(e) => { e.stopPropagation(); const a = document.createElement('a'); a.href = data.videoUrl; a.download = `YR_Video_${Date.now()}.mp4`; a.click(); }} 
                 className="flex items-center gap-1 px-2.5 py-1 rounded-[8px] text-[10px] font-bold text-zinc-300 hover:text-black hover:bg-white transition-all shadow-md whitespace-nowrap"
               >
                 <Download size={10}/> 下载
@@ -1853,7 +1872,7 @@ export const VideoClipNode = ({ id, data, selected }: any) => {
              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm z-10">
                <Loader2 size={24} className="animate-spin text-amber-400 mb-2" />
                <span className="text-[10px] text-amber-400 uppercase tracking-widest font-bold animate-pulse">
-                  {status === 'pending' ? '排队等待中...' : '正在生成视频...'}
+                 {status === 'pending' ? 'QUEUED / 排队中...' : 'Synthesizing Video...'}
                </span>
              </div>
           )}
@@ -1995,7 +2014,10 @@ export const MediaNode = ({ id, data, selected }: any) => {
     '16:9': { width: '320px', aspectRatio: '16/9' }, '9:16': { width: '220px', aspectRatio: '9/16' },
     '1:1': { width: '260px', aspectRatio: '1/1' }, '4:3': { width: '280px', aspectRatio: '4/3' }, '3:4': { width: '240px', aspectRatio: '3/4' }
   };
-  const currentStyle = ratioStyleMap[data.ratio || '16:9'] || ratioStyleMap['16:9'];
+  // ★ 优先使用图片真实比例（来自资产表提取），否则回退预设比例表
+  const currentStyle = data.customAspectRatio
+    ? { width: `${data.customWidth || 320}px`, aspectRatio: String(data.customAspectRatio) }
+    : (ratioStyleMap[data.ratio || '16:9'] || ratioStyleMap['16:9']);
 
   // 高清放大确认
   const handleHDConfirm = () => {
@@ -2125,7 +2147,9 @@ export const MediaNode = ({ id, data, selected }: any) => {
   const handleDownload = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!displayImage) return;
-    forceDownload(displayImage, `YR_Image_${Date.now()}.png`);
+    const a = document.createElement('a');
+    a.href = displayImage; a.download = `YR_Image_${Date.now()}.png`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
   };
 
   const handleSaveAsset = (category: string) => {
@@ -2165,7 +2189,7 @@ export const MediaNode = ({ id, data, selected }: any) => {
           {showHDSettings && (
             <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 bg-[#0a0a0c]/95 backdrop-blur-3xl border border-white/10 rounded-[16px] p-4 z-[150] shadow-2xl flex flex-col gap-3 min-w-[220px] animate-in fade-in slide-in-from-top-2">
               <div className="text-white text-[12px] font-bold flex items-center gap-2">
-                <Maximize size={14} className="text-zinc-400"/> 高清放大
+                <Maximize size={14} className="text-indigo-400"/> 高清放大
               </div>
               <div className="flex flex-col gap-2 text-[11px] text-zinc-300">
                 <div className="flex justify-between"><span className="text-zinc-500">模型</span><span className="font-mono">hd-upscale-v1</span></div>
@@ -2173,7 +2197,7 @@ export const MediaNode = ({ id, data, selected }: any) => {
               </div>
               <div className="flex gap-2 justify-end mt-1">
                 <button onClick={() => setShowHDSettings(false)} className="px-3 py-1.5 rounded-full bg-white/5 text-zinc-300 text-[10px] font-bold hover:bg-white/10 transition-all">取消</button>
-                <button onClick={handleHDConfirm} className="px-4 py-1.5 rounded-full bg-white text-black text-[10px] font-bold hover:bg-zinc-200 transition-all shadow-lg">确认放大</button>
+                <button onClick={handleHDConfirm} className="px-4 py-1.5 rounded-full bg-indigo-500 text-white text-[10px] font-bold hover:bg-indigo-400 transition-all shadow-lg">确认放大</button>
               </div>
             </div>
           )}
@@ -2203,7 +2227,7 @@ export const MediaNode = ({ id, data, selected }: any) => {
         <div className="w-full h-full relative flex items-center justify-center bg-transparent rounded-[20px] overflow-hidden">
         {displayImage ? (
             <div className="relative w-full h-full">
-              <img ref={imgRef} src={displayImage} className="w-full h-full object-cover" crossOrigin="anonymous" />
+              <img ref={imgRef} src={displayImage} className="w-full h-full object-contain" crossOrigin="anonymous" />
               {isAnnotating && (
                 <>
                   <canvas
@@ -2305,7 +2329,7 @@ export const MediaNode = ({ id, data, selected }: any) => {
               {data.isGenerating ? (
                  <div className="z-10 flex flex-col items-center">
                     <Loader2 size={24} className="mb-3 animate-spin text-indigo-400 drop-shadow-[0_0_15px_rgba(99,102,241,1)]" />
-                     <span className="text-[10px] uppercase font-bold tracking-widest text-indigo-300 animate-pulse drop-shadow-[0_0_8px_rgba(99,102,241,0.8)]">正在生成...</span>
+                    <span className="text-[10px] uppercase font-bold tracking-widest text-indigo-300 animate-pulse drop-shadow-[0_0_8px_rgba(99,102,241,0.8)]">Synthesizing...</span>
                  </div>
               ) : (
                  <div 
@@ -2497,7 +2521,9 @@ export const RenderNode = ({ id, data, selected }: any) => {
   const handleDownload = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!displayVideo) return;
-    forceDownload(displayVideo, `YR_Video_${Date.now()}.mp4`);
+    const a = document.createElement('a');
+    a.href = displayVideo; a.download = `YR_Video_${Date.now()}.mp4`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
   };
 
   return (
@@ -2611,7 +2637,7 @@ export const RenderNode = ({ id, data, selected }: any) => {
               {data.isGenerating ? (
                 <>
                   <Loader2 size={24} className="mb-3 opacity-80 animate-spin text-amber-200" />
-                   <span className="text-[10px] uppercase font-bold tracking-widest text-amber-200 animate-pulse">正在生成...</span>
+                  <span className="text-[10px] uppercase font-bold tracking-widest text-amber-200 animate-pulse">Synthesizing Video...</span>
                 </>
               ) : (
                 <>
@@ -2910,78 +2936,72 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
     updateNodeData(id, { rows: newRows });
   };
 
-  // ✨ 单行生成逻辑
+  // ✨ 单行生成逻辑（统一复用 buildImagePayload + 自动重试）
   const handleGenerateRow = async (rowId: string) => {
     const row = data.rows?.find((r: any) => r.id === rowId);
     if (!row || row.isGenerating) return;
 
     updateRow(rowId, 'isGenerating', true);
     
-    // 🚨 核心切断：拒绝隐式获取右上角预设。下拉框没选强覆写，就不加任何尾巴，保证所见即所得！
-    const styleStr = (data.styleOverride && data.styleOverride !== '继承全局预设') ? `, ${data.styleOverride}` : '';
-    const finalPromptForApi = `${row.prompt}${styleStr}`;
+    // ★ 复用引擎统一 Payload 拼装器，消除参数不一致导致 400 的风险
+    const canvasSettings = useAppStore.getState().canvasSettings;
+    const payload = buildImagePayload(
+      { prompt: row.prompt, model: data.model, ratio: data.ratio, quality: data.quality || '1K' },
+      canvasSettings
+    );
 
-    const targetModel = data.model || 'gpt-image-2';
-    const targetRatio = data.ratio || '16:9';
-    const isHD = data.quality === '高清 HD (耗时)';
+    console.log("[AssetTable 生图] 统一 Payload:", payload);
 
-    let targetSize = '1024x1024';
-    if (targetModel.includes('seedream')) {
-      const srMap: Record<string, string> = {
-        '1:1': '1920x1920', '16:9': '2560x1440', '9:16': '1440x2560', '4:3': '2048x1536', '3:4': '1536x2048'
-      };
-      targetSize = srMap[targetRatio] || '2560x1440';
-    } else if (targetModel === 'gpt-image-2') {
-      const gptMap: Record<string, string> = {
-        '1:1': '1024x1024', '16:9': '1792x1024', '9:16': '1024x1792', '4:3': '1792x1024', '3:4': '1024x1792'
-      };
-      targetSize = gptMap[targetRatio] || '1024x1024';
-    } else {
-      if (isHD) {
-        const hdMap: Record<string, string> = {
-          '1:1': '2048x2048', '16:9': '1920x1080', '9:16': '1080x1920', '4:3': '2048x1536', '3:4': '1536x2048'
-        };
-        targetSize = hdMap[targetRatio] || '1920x1080';
-      } else {
-        const defaultMap: Record<string, string> = {
-          '1:1': '1024x1024', '16:9': '1024x576', '9:16': '576x1024', '4:3': '1024x768', '3:4': '768x1024'
-        };
-        targetSize = defaultMap[targetRatio] || '1024x576';
+    // ★ 自动重试：最多 3 次，指数退避 1s/2s/4s
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const response = await fetchApi('/v1/images/generations', { method: 'POST', body: JSON.stringify(payload) });
+        const resData = await response.json();
+        const url = resData.data?.[0]?.url || resData.url;
+
+        if (url) {
+          updateRowMulti(rowId, { resultUrl: url, isGenerating: false });
+          saveToAssets(url, payload.prompt);
+          return; // 成功，退出
+        }
+        throw new Error("API未返回图片 URL");
+      } catch (e) {
+        console.error(`[AssetTable 生图] 第 ${attempt + 1}/3 次失败:`, e);
+        if (attempt >= 2) {
+          useAppStore.getState().setToastMsg(`❌ 生成失败（已重试3次）：${(e as Error).message || '网络错误'}`);
+          updateRow(rowId, 'isGenerating', false);
+          return;
+        }
+        // 指数退避等待后重试
+        await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 1000));
       }
     }
+  };
 
-    const payload = {
-      model: targetModel,
-      prompt: finalPromptForApi,
-      ratio: targetRatio,
-      size: targetSize,
-      n: 1
-    };
-    try {                                          
-      const response = await fetchApi('/v1/images/generations', { method: 'POST', body: JSON.stringify(payload) });
-      const resData = await response.json();
-      const url = resData.data?.[0]?.url || resData.url;
-
-      if (url) {
-         // ✨ 核心修复：同时写入 URL 和关闭 Loading 状态，防止 finally 把状态冲刷掉
-         updateRowMulti(rowId, { resultUrl: url, isGenerating: false });
-         saveToAssets(url, finalPromptForApi);
-      } else {
-         throw new Error("API未返回图片");
-      }
-    } catch (e) {
-      useAppStore.getState().setToastMsg("生成失败，请检查网络或算力");
-      updateRow(rowId, 'isGenerating', false);
-    } 
-    // 🚨 删除了 finally 块，让成功和失败分支自己管理 Loading 关闭
-  }; // 🚨 核心修复1：必须补上这行 }; 把单行生成函数闭合掉！
-
-  // ✨ 批量生成逻辑
-  const handleBatchGenerate = () => {
+  // ✨ 批量生成逻辑（加入队列控制，最大并发 2，防止 API 限流）
+  const handleBatchGenerate = async () => {
     const rowsToGen = data.rows?.filter((r:any) => !r.resultUrl && !r.isGenerating) || [];
-    if(rowsToGen.length === 0) return useAppStore.getState().setToastMsg("当前没有需要生成的空行！");
-    useAppStore.getState().setToastMsg(`🚀 已将 ${rowsToGen.length} 个资产压入渲染队列...`);
-    rowsToGen.forEach((r:any) => handleGenerateRow(r.id));
+    if (rowsToGen.length === 0) return useAppStore.getState().setToastMsg("当前没有需要生成的空行！");
+    useAppStore.getState().setToastMsg(`🚀 已将 ${rowsToGen.length} 个资产压入渲染队列（并发上限2）...`);
+    
+    // ★ 队列控制：一次最多并发 2 个，逐个放行
+    let completed = 0;
+    const total = rowsToGen.length;
+    const queue = [...rowsToGen];
+    
+    const worker = async () => {
+      while (queue.length > 0) {
+        const row = queue.shift();
+        if (row) {
+          await handleGenerateRow(row.id);
+          completed++;
+          useAppStore.getState().setToastMsg(`📊 资产生成进度：${completed}/${total}`);
+        }
+      }
+    };
+    
+    // 启动 2 个并发 worker
+    await Promise.all([worker(), worker()]);
   };
 
   // ✨ 导出为资产 JSON 压缩包
@@ -3006,10 +3026,12 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
     useAppStore.getState().setToastMsg(`✅ ${typeName} 导出成功！`);
   };
 
-  // ✨ 提取独立节点到画布 (Bug修复版)
+  // ✨ 提取独立节点到画布 (比例自动检测版)
   const extractToCanvas = (row: any) => {
     const thisNode = getNodes().find(n => n.id === id);
     if (!thisNode) return;
+
+    // ★ 先创建节点，再异步修正比例（避免阻塞 UI）
     const newNodeId = `media_ext_${Date.now()}`;
     const newNode = {
       id: newNodeId, type: 'media',
@@ -3023,13 +3045,34 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
            category: type,
            ratio: data.ratio || '16:9'
         },
-        ratio: data.ratio || '16:9', 
+        ratio: data.ratio || '16:9', // 初始用表格比例，异步检测后会修正
         model: data.model || 'gpt-image-2',
         name: type === 'character' ? `@${row.name}` : row.name
       }
     };
     setNodes(nds => [...nds, newNode]);
-    useAppStore.getState().setToastMsg("✅ 已提取为独立图片节点！");
+
+    // ★ 异步检测图片真实比例，修正节点 ratio（防 object-cover 表格中比例误导）
+    const img = new Image();
+    img.onload = () => {
+      const w = img.naturalWidth, h = img.naturalHeight;
+      if (w && h) {
+        const rawRatio = w / h;
+        // ★ 使用图片真实比例，不做离散预设匹配。宽度自适应：横图 320px，竖图按比例缩小
+        const customWidth = rawRatio >= 1 ? 320 : Math.round(220 * rawRatio);
+        // 用函数式更新：写入原始比例值，画布渲染时直接使用
+        setNodes(nds => nds.map(n => {
+          if (n.id === newNodeId) {
+            return { ...n, data: { ...n.data, ratio: w >= h ? '16:9' : '9:16', customAspectRatio: rawRatio, customWidth, asset: { ...n.data.asset, ratio: w >= h ? '16:9' : '9:16', customAspectRatio: rawRatio, customWidth } } };
+          }
+          return n;
+        }));
+      }
+    };
+    img.onerror = () => {}; // 图片加载失败就保持表格原比例
+    img.src = row.resultUrl;
+
+    useAppStore.getState().setToastMsg("✅ 已提取为独立图片节点（比例自动检测中...）");
   };
 
   const getTheme = () => {
@@ -3043,12 +3086,11 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
   const InputField = ({ value, onChange, placeholder }: any) => (
     <textarea 
       className="w-full h-full min-h-[100px] bg-black/40 border border-white/5 focus:border-white/20 hover:bg-white/[0.02] rounded-[8px] p-2 text-[11px] text-zinc-300 outline-none resize-none custom-scrollbar nodrag nopan transition-colors" 
-      value={value || ''} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} onWheelCapture={(e) => { if (!e.ctrlKey && !e.metaKey) e.stopPropagation(); }} 
-    />
+      value={value || ''} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />
   );
 
   return (
-    <div className="relative group/node z-20" style={{ width: theme.width }}>
+    <div className="relative group/node z-20" style={{ width: theme.width, minHeight: '200px' }}>
       <Handle type="target" position={Position.Left} id="left" className={handleLeft} />
       <Handle type="source" position={Position.Right} id="right" className={handleRight} />
       
@@ -3056,11 +3098,12 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
       {zenMode && zenMode.type === 'text' && (
         <ZenEditor label={zenMode.label} value={data.rows?.find((r:any)=>r.id===zenMode.rowId)?.[zenMode.field] || ''} onChange={(val: string) => updateRow(zenMode.rowId, zenMode.field, val)} onClose={() => setZenMode(null)} />
       )}
-      {zenMode && zenMode.type === 'image' && (
+      {zenMode && zenMode.type === 'image' && createPortal(
         <div className="fixed inset-0 z-[999999] flex items-center justify-center bg-black/90 backdrop-blur-md p-8" onClick={() => setZenMode(null)}>
            <img src={zenMode.url} className="max-w-[90vw] max-h-[90vh] object-contain rounded-[16px] shadow-[0_0_100px_rgba(0,0,0,1)]" onClick={e=>e.stopPropagation()}/>
            <button onClick={() => setZenMode(null)} className="absolute top-6 right-6 p-3 bg-white/10 hover:bg-red-500 rounded-full text-white transition-colors"><X size={20}/></button>
-        </div>
+        </div>,
+        document.body
       )}
 
       <div className={`${nodeBaseClass} ${selected ? selectedBorderClass : unselectedBorderClass} flex flex-col p-4 transition-all duration-500`}>
@@ -3084,14 +3127,26 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
         <div className="flex items-center gap-3 bg-black/50 p-2.5 rounded-[12px] border border-white/5 mb-3 shadow-inner shrink-0">
             <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1"><Settings2 size={12} className="inline mr-1"/>全局参数</span>
             <div className="w-px h-4 bg-white/10 mx-1"/>
+            {/* ★ 模型选项与 ShotNode/MediaNode 对齐，移除不存在的 banana2 */}
             <CustomSelect className="w-[140px]" value={data.model || 'gpt-image-2'} options={[
   { value: 'gpt-image-2', label: 'GPT-Image-2' },
   { value: 'banana-pro', label: 'Banana Pro' },
-  { value: 'banana2', label: 'Banana 2' },
   { value: 'seedream5.0', label: 'Seedream 5.0' }
-]} onChange={(v: string) => updateNodeData(id, { model: v })} />
-            <CustomSelect className="w-[100px]" value={data.ratio || '16:9'} options={[{ value: '16:9', label: '16:9' }, { value: '9:16', label: '9:16' }, { value: '1:1', label: '1:1' }, { value: '4:3', label: '4:3' }, { value: '3:4', label: '3:4' }]} onChange={(v: string) => updateNodeData(id, { ratio: v })} />
-            <CustomSelect className="w-[120px]" value={data.quality || '标准 Standard'} options={[{ value: '标准 Standard', label: '标准 (2K)' }, { value: '高清 HD (耗时)', label: '极致 (4K)' }]} onChange={(v: string) => updateNodeData(id, { quality: v })} />
+]} onChange={(v: string) => {
+  // ★ 模型切换时自动重置画质到兼容值（与 ShotNode 行为一致）
+  let nextQuality = data.quality || '1K';
+  if (v === 'seedream5.0') {
+    if (!['2K', '3K'].includes(nextQuality)) nextQuality = '2K';
+  } else if (v === 'banana-pro') {
+    if (!['1K', '2K', '4K'].includes(nextQuality)) nextQuality = '2K';
+  } else {
+    nextQuality = '1K';
+  }
+  updateNodeData(id, { model: v, quality: nextQuality });
+}} />
+            <CustomSelect className="w-[100px]" value={data.ratio || useAppStore.getState().canvasSettings.globalRatio || '16:9'} options={[{ value: '16:9', label: '16:9' }, { value: '9:16', label: '9:16' }, { value: '1:1', label: '1:1' }, { value: '4:3', label: '4:3' }, { value: '3:4', label: '3:4' }]} onChange={(v: string) => updateNodeData(id, { ratio: v })} />
+            {/* ★ 画质选项：根据当前模型动态生成，与 ShotNode 标准一致 */}
+            <CustomSelect className="w-[120px]" value={data.quality || getImageQualityOptions(data.model || 'gpt-image-2')[0].value} options={getImageQualityOptions(data.model || 'gpt-image-2')} onChange={(v: string) => updateNodeData(id, { quality: v })} />
             <CustomSelect className="w-[140px]" value={data.styleOverride || '继承全局预设'} options={[{ value: '继承全局预设', label: '继承全局预设' }, { value: '🎬 电影质感', label: '🎬 电影质感' }, { value: '🌸 二次元', label: '🌸 二次元' }, { value: '📷 极致写实', label: '📷 极致写实' }, { value: '🧊 3D 渲染', label: '🧊 3D 渲染' }, { value: '🌃 赛博朋克', label: '🌃 赛博朋克' }]} onChange={(v: string) => updateNodeData(id, { styleOverride: v })} />
             
             <button onClick={handleBatchGenerate} className="px-5 py-2 bg-indigo-500 text-white hover:bg-indigo-400 rounded-[8px] text-[11px] font-bold shadow-[0_0_15px_rgba(99,102,241,0.4)] transition-all ml-auto flex items-center gap-1.5 nodrag">
@@ -3113,7 +3168,7 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
         </div>
 
         {/* 数据行遍历 */}
-        <div className="flex flex-col gap-2 max-h-[70vh] overflow-y-auto custom-scrollbar pr-1">
+        <div className="flex flex-col gap-2 max-h-[70vh] overflow-y-auto custom-scrollbar pr-1 nowheel" onWheelCapture={(e) => { if (e.target instanceof HTMLTextAreaElement) return; const el = e.currentTarget; el.scrollTop += e.deltaY; e.stopPropagation(); e.preventDefault(); }}>
            {data.rows?.map((row: any) => (
               <div key={row.id} className="flex gap-2 bg-[#050505]/50 hover:bg-[#050505] border border-white/5 hover:border-white/20 p-1.5 rounded-[12px] transition-all items-stretch">
                 
@@ -3144,11 +3199,15 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
 
                  {/* ✨ 核心：成图列 (自适应放大与生成控制) */}
                  <div className="w-[23%] relative bg-black/60 border border-white/5 rounded-[8px] flex flex-col items-center justify-center group/img overflow-hidden min-h-[100px]">
-                    {row.isGenerating ? (
-                       <div className="flex flex-col items-center gap-2 text-indigo-400">
-                         <Loader2 size={24} className="animate-spin" />
-                         <span className="text-[10px] font-mono tracking-widest animate-pulse">RENDERING...</span>
-                       </div>
+                     {row.isGenerating ? (
+                        <div className="flex flex-col items-center gap-2 text-indigo-400">
+                          <Loader2 size={24} className="animate-spin" />
+                          <span className="text-[10px] font-mono tracking-widest animate-pulse">RENDERING...</span>
+                          {/* ★ 终止按钮：解决生图卡死/转圈时无法重试的问题 */}
+                          <button onClick={() => updateRowMulti(row.id, { isGenerating: false })} className="px-3 py-1 bg-red-500/20 hover:bg-red-500/50 text-red-300 hover:text-white rounded-[6px] text-[10px] font-bold transition-all nodrag flex items-center gap-1 border border-red-500/30">
+                            <X size={10}/> 终止
+                          </button>
+                        </div>
                     ) : row.resultUrl ? (
                        <>
                          <img src={row.resultUrl} className="w-full h-full object-cover cursor-pointer hover:scale-105 transition-transform duration-500" onClick={() => setZenMode({ type: 'image', url: row.resultUrl })}/>

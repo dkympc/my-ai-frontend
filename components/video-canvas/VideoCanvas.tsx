@@ -266,21 +266,26 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
     useAppStore.getState().setToastMsg("🧹 时空裂隙已彻底净化清空。");
   }, []);
 
-  // ★ 用户每次微小操作（拖拽节点、编辑文本、连线等）立即存入 Zustand
-  // 不再使用防抖延迟，确保画布状态零延迟持久化到内存 + localStorage 救命底稿
+  // ✨ 实时监测变动并触发自动保存 (加入防抖与初次挂载拦截)
   const isFirstRender = useRef(true);
   useEffect(() => {
-    // 核心修复：防止组件刚挂载时，把空数组 [] 错误地覆写回云端
+    // 核心修复 2：防止组件刚挂载时，把空数组 [] 错误地覆写回云端
     if (isFirstRender.current) {
        isFirstRender.current = false;
        return;
     }
 
     if (activeCanvasProjectId && typeof updateCanvasProject === 'function') {
-      updateCanvasProject(activeCanvasProjectId, { nodes, edges });
-      setSaveStatus('saved'); // ★ 本地存储即刻完成（云端同步由 page.tsx 固定间隔触发器负责）
+      setSaveStatus('saving');
+      
+      const timer = setTimeout(() => {
+        updateCanvasProject(activeCanvasProjectId, { nodes, edges });
+        setSaveStatus('saved');
+      }, 1500); 
+      
+      return () => clearTimeout(timer); 
     }
-  }, [nodes, edges, activeCanvasProjectId, updateCanvasProject]);
+  }, [nodes, edges, activeCanvasProjectId]);
 
     // ✨ 新增：节点剪贴板状态
     const [clipboard, setClipboard] = useState<{nodes: any[], edges: any[]} | null>(null);
@@ -834,7 +839,7 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
                 placeholder="跟随题材默认节奏"
               />
               <p className="text-[10px] text-zinc-600 leading-relaxed pl-1">
-                 题材会优先主导画布中的分镜节奏/光影等元素，如您不清楚您的剧本类型，默认通用即可。
+                选择题材后，裂变分镜将自动注入导演审美引导。题材默认为"通用"状态，不注入风格化参数。以上为建议，不锁死。
               </p>
             </div>
 
@@ -863,25 +868,29 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
               
               <button
                 onClick={() => {
-                  // 🚀 比例穿透：将 globalRatio 穿透到所有 ShotNode 的 globalRatioOverride 字段
+                  // 🚀 比例穿透：将 globalRatio 穿透到所有可视化节点类型（shot/videoClip/media/render/assetTable）
                   const currentRatio = canvasSettings?.globalRatio || '16:9';
+                  // 需要穿透的节点类型（全部支持比例的节点）
+                  const targetTypes = new Set(['shot', 'videoClip', 'media', 'render', 'assetTable']);
                   setNodes(nds => nds.map(node => {
-                    if (node.type === 'shot') {
+                    if (targetTypes.has(node.type || '')) {
                       return {
                         ...node,
                         data: {
                           ...node.data,
-                          globalRatioOverride: currentRatio
+                          globalRatioOverride: currentRatio,
+                          // assetTable 也同步更新自己的独立 ratio 字段
+                          ...(node.type === 'assetTable' ? { ratio: currentRatio } : {})
                         }
                       };
                     }
                     return node;
                   }));
-                  useAppStore.getState().setToastMsg(`◈ 分镜比例已统一为 [${currentRatio}]`);
+                  useAppStore.getState().setToastMsg(`⚡ 已将全局比例 [${currentRatio}] 穿透覆盖到所有节点！`);
                 }}
                 className="w-full py-3 rounded-[16px] border border-white/10 bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white text-[12px] font-bold tracking-widest transition-all active:scale-[0.98] shadow-md flex items-center justify-center gap-2"
               >
-                <span>◈ 分镜Shot比例穿透</span>
+                <span>⚡ 全局比例穿透覆盖</span>
               </button>
             </div>
 
@@ -954,14 +963,14 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
                   }));
 
                   if (currentSuffix.trim()) {
-                    useAppStore.getState().setToastMsg(`＋ 后缀已添加到所有分镜`);
+                    useAppStore.getState().setToastMsg(`✨ 智能全局后缀已成功追加（已去重、防套娃污染）`);
                   } else {
-                    useAppStore.getState().setToastMsg(`＋ 已清除所有分镜的后缀`);
+                    useAppStore.getState().setToastMsg(`🧹 已安全清除所有分镜的全局提示词后缀`);
                   }
                 }}
-                className="w-full py-3 rounded-[16px] border border-white/10 bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white text-[12px] font-bold tracking-widest transition-all active:scale-[0.98] shadow-md flex items-center justify-center gap-2"
+                className="w-full py-3 rounded-[16px] bg-indigo-500 hover:bg-indigo-400 text-white text-[12px] font-bold tracking-widest transition-all active:scale-[0.98] shadow-[0_10px_25px_rgba(99,102,241,0.3)] flex items-center justify-center gap-2"
               >
-                <span>＋ 添加后缀</span>
+                <span>✨ 智能追加至所有分镜</span>
               </button>
             </div>
           </div>

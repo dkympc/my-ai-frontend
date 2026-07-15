@@ -1,19 +1,6 @@
 // store/useAppStore.ts
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware'; // ✨ 引入持久化魔法
-
-// ★ 救命底稿：localStorage 键名，存储完整画布项目（含 nodes/edges/localAssets）
-const CANVAS_BACKUP_KEY = 'yr-canvas-full-backup';
-
-// ★ 写入 localStorage 完整备份（同步操作，Zustand set() 中可直接调用）
-const writeCanvasBackup = (projects: any[]) => {
-  try {
-    localStorage.setItem(CANVAS_BACKUP_KEY, JSON.stringify(projects));
-  } catch (e) {
-    console.error("[Canvas Backup Error] localStorage 写入失败，可能数据过大：", e);
-  }
-};
-
 interface AppSettings {
   nickname: string;
   avatar: string;
@@ -30,7 +17,7 @@ interface AppState {
     // ✨ 新增画布全局设置
   canvasSettings: { defaultImageModel: string; defaultVideoModel: string; globalPromptSuffix: string; globalRatio: string; directorGenre: string; directorTempo: string; };
   setCanvasSettings: (updater: any) => void;
-  activeView: 'chat' | 'image-gen' | 'video-gen' | 'workflow-gallery' | 'workflow-execution' | 'video-canvas';
+  activeView: 'chat' | 'image-gen' | 'video-gen' | 'workflow-gallery' | 'workflow-execution' | 'video-canvas' | 'agent-customer-service';
   activeCanvasProjectId: string | null;
   isSettingsModalOpen: boolean;
   isFilmControlOpen: boolean; // ✨ 新增：影视中控台抽屉开关状态
@@ -38,7 +25,7 @@ interface AppState {
   toastMsg: string | null;
   outOfBalanceMsg: string | null;
   streamText: string; 
-  setActiveView: (view: 'chat' | 'image-gen' | 'video-gen' | 'workflow-gallery' | 'workflow-execution' | 'video-canvas') => void;
+  setActiveView: (view: 'chat' | 'image-gen' | 'video-gen' | 'workflow-gallery' | 'workflow-execution' | 'video-canvas' | 'agent-customer-service') => void;
   setActiveCanvasProjectId: (id: string | null) => void;
   setIsSettingsModalOpen: (isOpen: boolean) => void;
   setIsFilmControlOpen: (isOpen: boolean) => void; // ✨ 新增：设置开关函数
@@ -63,16 +50,21 @@ export const useAppStore = create<AppState>()(
         const exists = (state.canvasProjects || []).find((p:any) => p.id === id);
         // ★ 支持函数式更新：调用方可传 function(prev) 读取原子快照，消除竞态条件
         const mergeData = typeof data === 'function' ? data(exists) : data;
-        let newProjects;
+        let updatedProjects;
         if (exists) {
-          newProjects = state.canvasProjects.map((p: any) => p.id === id ? { ...p, ...mergeData, updatedAt: Date.now() } : p);
+          updatedProjects = state.canvasProjects.map((p: any) => p.id === id ? { ...p, ...mergeData, updatedAt: Date.now() } : p);
         } else {
-          newProjects = [...(state.canvasProjects || []), { id, ...mergeData, updatedAt: Date.now() }];
+          updatedProjects = [...(state.canvasProjects || []), { id, ...mergeData, updatedAt: Date.now() }];
         }
-        // ★ 救命底稿：每次画布变更都完整写入 localStorage（含 nodes/edges/localAssets）
-        // 确保即使云端同步失败、页面崩溃，刷新后也能从本地恢复完整画布
-        writeCanvasBackup(newProjects);
-        return { canvasProjects: newProjects };
+        // ★ P0 存储加固：每次画布数据变更后，异步写入 localStorage 全量备份（防刷新/换浏览器丢失）
+        // 使用 setTimeout 0 延迟，避免阻塞 Zustand set 的同步路径
+        const projectForBackup = updatedProjects.find((p: any) => p.id === id);
+        if (projectForBackup) {
+          setTimeout(() => {
+            try { localStorage.setItem('yr-canvas-full-backup', JSON.stringify(projectForBackup)); } catch(e) {}
+          }, 0);
+        }
+        return { canvasProjects: updatedProjects };
       }),
       activeCanvasProjectId: null,
       isSettingsModalOpen: false,
