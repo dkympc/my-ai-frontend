@@ -24,13 +24,16 @@ import {
 import '@xyflow/react/dist/style.css'; 
 
 // 🚀 唯一引用的 lucide-react，完美避开所有重名报错
-import { ArrowLeft, Plus, Type, Image as ImageIconIcon, Film, ZoomIn, ZoomOut, Maximize, Clapperboard, Layers, Check, Settings, X, Loader2, RotateCcw, Sliders, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Plus, Type, Image as ImageIconIcon, Film, ZoomIn, ZoomOut, Maximize, Clapperboard, Layers, Check, Settings, X, Loader2, RotateCcw, Sliders, ChevronDown, MessageSquare } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { GENRE_PRESETS, TEMPO_PROFILES } from '@/lib/director-rules';
 import AssetDock from './AssetDock'; 
 import { ImageRecord, VideoRecord } from '@/lib/types'; 
 import { fetchApi } from '@/services/api';
 import { showConfirm } from '@/lib/dialogStore';
+import { useCanvasCopilot } from '@/hooks/useCanvasCopilot';
+import CopilotPanel from './CopilotPanel';
+import SelectionAssist from './SelectionAssist'; // ★ 全局文字选中 AI 助手
 
 interface WorkspaceProps {
     imageHistory: ImageRecord[];
@@ -89,7 +92,7 @@ function ZoomPanel() {
 }
 
 function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
-  const { activeCanvasProjectId, setActiveCanvasProjectId, canvasProjects, updateCanvasProject, canvasSettings, setCanvasSettings, isFilmControlOpen, setIsFilmControlOpen } = useAppStore();
+  const { activeCanvasProjectId, setActiveCanvasProjectId, canvasProjects, updateCanvasProject, canvasSettings, setCanvasSettings, isFilmControlOpen, setIsFilmControlOpen, copilotIsOpen, setCopilotIsOpen } = useAppStore();
   const currentProject = (canvasProjects || []).find((p: any) => p.id === activeCanvasProjectId);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(currentProject?.nodes || []);
@@ -124,6 +127,26 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
   const undoThrottleRef = useRef<NodeJS.Timeout | null>(null);
   const [deletedNodes, setDeletedNodes] = useState<any[]>([]); // ✨ 新增：时空回收站软删除备份栈
   const [isRecyclerOpen, setIsRecyclerOpen] = useState(false); // ✨ 新增：时空回收站展开状态
+
+  // ★★★ AI 画布副驾驶引擎 ★★★
+  const copilot = useCanvasCopilot({
+    getNodes,
+    getEdges,
+    setNodes,
+    setEdges,
+    // 执行前拍快照：推入 undoHistory，确保用户可 Ctrl+Z 回退
+    onBeforeAction: () => {
+      const snapNodes = getNodes();
+      const snapEdges = getEdges();
+      setUndoHistory(prev => [...prev.slice(-49), { nodes: JSON.parse(JSON.stringify(snapNodes)), edges: JSON.parse(JSON.stringify(snapEdges)) }]);
+    },
+    // 执行后触发同步：标记脏数据，自动保存到云端
+    onAfterAction: () => {
+      if (activeCanvasProjectId && typeof updateCanvasProject === 'function') {
+        updateCanvasProject(activeCanvasProjectId, { nodes: getNodes(), edges: getEdges() });
+      }
+    },
+  });
 
   // ✨ 全局状态锁
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving'>('saved');
@@ -1032,6 +1055,16 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
         </div>,
         document.body
       )}
+
+      {/* ★★★ 创作助手全局面板 ★★★ */}
+      <CopilotPanel 
+        isOpen={copilotIsOpen} 
+        onClose={() => setCopilotIsOpen(false)} 
+        copilot={copilot} 
+      />
+
+      {/* ★★★ 全局文字选中 AI 助手 — 所有 textarea/input 选中文字后弹出 ★★★ */}
+      <SelectionAssist />
       {ripples.map(r => (
         <div
           key={r.id}
@@ -1109,6 +1142,19 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
         >
           <Sliders size={14} className={isFilmControlOpen ? 'text-indigo-400 animate-spin-slow' : 'text-zinc-500'} />
           影视总控
+        </button>
+
+        {/* ✨ 新增：创作助手一键开关 Pill 按钮 */}
+        <button 
+          onClick={() => setCopilotIsOpen(!copilotIsOpen)}
+          className={`h-10 px-4 rounded-full backdrop-blur-3xl border flex items-center gap-2 text-[12px] font-bold tracking-widest transition-all duration-300 shadow-[0_10px_30px_rgba(0,0,0,0.8)] hover:scale-105 ${
+            copilotIsOpen 
+              ? 'bg-white/[0.08] border-white/[0.15] text-zinc-300' 
+              : 'bg-black/60 border-white/[0.08] text-zinc-400 hover:text-white hover:border-white/20'
+          }`}
+        >
+          <MessageSquare size={14} className={copilotIsOpen ? 'text-zinc-300' : 'text-zinc-500'} />
+          创作助手
         </button>
 
         <div className="h-10 px-4 rounded-full bg-black/60 backdrop-blur-3xl border border-white/[0.08] shadow-[0_10px_30px_rgba(0,0,0,0.8)] flex items-center gap-3 group hover:border-white/20 transition-all duration-300">

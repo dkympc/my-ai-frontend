@@ -123,7 +123,7 @@ const handleRight = `${handleBase} !-right-[12px]`;
 // ==========================================
 // ✨ 全新组件：支持 @ 唤出的超级输入框 (大图预览 + 实体命名)
 // ==========================================
-function MentionTextarea({ value, onChange, placeholder, incomingAssets = [], disableMention = false }: any) {
+function MentionTextarea({ value, onChange, placeholder, incomingAssets = [], disableMention = false, dataAttrs = {} }: any) {
   const [showMenu, setShowMenu] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -162,6 +162,7 @@ function MentionTextarea({ value, onChange, placeholder, incomingAssets = [], di
         value={value}
         onChange={handleChange}
         onWheelCapture={(e) => { if (!e.ctrlKey && !e.metaKey) e.stopPropagation(); }}
+        {...dataAttrs}
       />
       
       {showMenu && (
@@ -316,7 +317,7 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
         ]
       };
 
-      const response = await fetchApi('/v1/chat/completions', { method: 'POST', body: JSON.stringify(payload) });
+      const response = await fetchApi('/v1/chat/completions', { method: 'POST', body: JSON.stringify({ ...payload, stream: false }) });
       const resData = await response.json();
       const cameraParams = resData.choices?.[0]?.message?.content?.trim() || "Shot on 35mm lens, cinematic lighting, 8k resolution";
       
@@ -387,7 +388,7 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
         ] 
       };
       
-      const response = await fetchApi('/v1/chat/completions', { method: 'POST', body: JSON.stringify(payload) });
+      const response = await fetchApi('/v1/chat/completions', { method: 'POST', body: JSON.stringify({ ...payload, stream: false }) });
       const resData = await response.json();
       const rawContent = resData.choices?.[0]?.message?.content || "";
       
@@ -582,7 +583,7 @@ ${directorCtx?.llmContextBlock || ''}`
         ]
       };
 
-      const res1 = await fetchApi('/v1/chat/completions', { method: 'POST', body: JSON.stringify(payloadStage1) });
+      const res1 = await fetchApi('/v1/chat/completions', { method: 'POST', body: JSON.stringify({ ...payloadStage1, stream: false }) });
       const data1 = await res1.json();
       if (!res1.ok || data1.error) throw new Error(`阶段1请求失败: ${data1.error?.message || res1.statusText}`);
       
@@ -661,7 +662,7 @@ ${directorCtx?.llmContextBlock || ''}`
         ]
       };
 
-      const res2 = await fetchApi('/v1/chat/completions', { method: 'POST', body: JSON.stringify(payloadStage2) });
+      const res2 = await fetchApi('/v1/chat/completions', { method: 'POST', body: JSON.stringify({ ...payloadStage2, stream: false }) });
       const data2 = await res2.json();
       if (!res2.ok || data2.error) throw new Error(`阶段2请求失败: ${data2.error?.message || res2.statusText}`);
 
@@ -936,6 +937,7 @@ ${directorCtx?.llmContextBlock || ''}`
           className="flex-1 w-full h-full bg-transparent text-[14px] text-zinc-200 placeholder-zinc-600 resize-none outline-none custom-scrollbar leading-relaxed nodrag nopan"
           placeholder="[在此粘贴几万字完整剧情大纲或剧本...]"
           value={data.text || ''} onChange={(e) => updateNodeData(id, { text: e.target.value })} onSelect={handleTextSelect} onWheelCapture={(e) => { if (!e.ctrlKey && !e.metaKey) e.stopPropagation(); }}
+          data-node-id={id} data-field="text" data-field-label="剧本内容"
         />
       </div>
 
@@ -1425,10 +1427,10 @@ export const ShotNode = ({ id, data, selected }: any) => {
             
          <div className="flex flex-col gap-1.5 mb-3 bg-[#050505]/50 p-2.5 rounded-[16px] border border-white/5 focus-within:border-white/20 transition-colors shadow-inner">
                <label className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest">场景光影轨</label>
-               <input value={data.sceneLighting || ''} onChange={(e) => { updateNodeData(id, { sceneLighting: e.target.value }); markDownstreamDirty(); }} className="bg-transparent text-[11px] text-zinc-300 font-mono outline-none nodrag nopan w-full" />
+                <input value={data.sceneLighting || ''} onChange={(e) => { updateNodeData(id, { sceneLighting: e.target.value }); markDownstreamDirty(); }} className="bg-transparent text-[11px] text-zinc-300 font-mono outline-none nodrag nopan w-full" data-node-id={id} data-field="sceneLighting" data-field-label="场景光影" />
             </div>
 
-            <div className="flex flex-col gap-1.5 mb-3 bg-[#050505]/50 p-2.5 rounded-[16px] border border-white/5 group/zen1 focus-within:border-white/20 transition-colors shadow-inner">
+            <div className="flex flex-col gap-1.5 mb-3 bg-[#050505]/50 p-2.5 rounded-[16px] border border-white/5 group/zen1 focus-within:border-white/20 transition-colors shadow-inner relative">
                <div className="flex justify-between items-center relative z-50">
                  <label className="text-[9px] font-bold text-zinc-400 flex items-center gap-2">
                     首帧锚定轨 
@@ -1473,18 +1475,18 @@ export const ShotNode = ({ id, data, selected }: any) => {
                    ))}
                  </div>
                )}
-               <MentionTextarea value={data.firstFrameAnchor || ''} onChange={(v: string) => { updateNodeData(id, { firstFrameAnchor: v }); markDownstreamDirty(); }} incomingAssets={incomingAssets} disableMention={true} />
-               {incomingAssets.filter((a:any) => a._type === 'image').length === 0 && (
+                <MentionTextarea value={data.firstFrameAnchor || ''} onChange={(v: string) => { updateNodeData(id, { firstFrameAnchor: v }); markDownstreamDirty(); }} incomingAssets={incomingAssets} disableMention={true} dataAttrs={{ 'data-node-id': id, 'data-field': 'firstFrameAnchor', 'data-field-label': '首帧锚定提示词' }} />
+                {incomingAssets.filter((a:any) => a._type === 'image').length === 0 && (
                  <div className="text-[10px] text-zinc-600 italic mb-1">
                    ⚠️ 左侧未连接参考图节点，将仅用提示词生成
                  </div>
                )}
             </div>
             
-            <div className="flex flex-col gap-1.5 mb-2 bg-[#050505]/50 p-2.5 rounded-[16px] border border-white/5 group/zen2 focus-within:border-white/20 transition-colors shadow-inner">
+             <div className="flex flex-col gap-1.5 mb-2 bg-[#050505]/50 p-2.5 rounded-[16px] border border-white/5 group/zen2 focus-within:border-white/20 transition-colors shadow-inner relative">
                <label className="text-[9px] font-bold text-zinc-400 flex justify-between">时序演进与动作轨 <button onClick={() => setZenMode({ field: 'videoPrompt', label: '动作提示词' })} className="opacity-0 group-hover/zen2:opacity-100 text-zinc-400 hover:text-white transition-colors"><Expand size={10}/></button></label>
-               <textarea value={data.videoPrompt || ''} onChange={(e) => { updateNodeData(id, { videoPrompt: e.target.value }); markDownstreamDirty(); }} className="w-full bg-black/40 border border-white/[0.05] rounded-[12px] p-3 text-[11px] text-zinc-300 outline-none resize-none custom-scrollbar min-h-[160px] nodrag nopan" onWheelCapture={(e) => e.stopPropagation() } />
-            </div>
+                <textarea value={data.videoPrompt || ''} onChange={(e) => { updateNodeData(id, { videoPrompt: e.target.value }); markDownstreamDirty(); }} className="w-full bg-black/40 border border-white/[0.05] rounded-[12px] p-3 text-[11px] text-zinc-300 outline-none resize-none custom-scrollbar min-h-[160px] nodrag nopan" onWheelCapture={(e) => e.stopPropagation() } data-node-id={id} data-field="videoPrompt" data-field-label="时序动作提示词" />
+               </div>
 
             <div className="h-px w-full bg-white/[0.05] my-3" />
 
@@ -1942,12 +1944,13 @@ export const VideoClipNode = ({ id, data, selected }: any) => {
                  <span className="flex items-center gap-1"><Film size={10}/> 运镜时序轨 (Inherited Action Track)</span>
                  <button onClick={() => setZenMode({ field: 'prompt', label: '运镜时序轨' })} className="opacity-0 group-hover/zen2:opacity-100 text-zinc-400 hover:text-white transition-colors"><Expand size={10}/></button>
                </label>
-               <MentionTextarea
-                  value={data.prompt || ''} 
-                  onChange={(v: string) => updateNodeData(id, { prompt: v })} 
-                  placeholder="等待接收来自上一级的时序运镜数据..." 
-                  incomingAssets={incomingAssets} 
-               />
+                <MentionTextarea
+                   value={data.prompt || ''} 
+                   onChange={(v: string) => updateNodeData(id, { prompt: v })} 
+                   placeholder="等待接收来自上一级的时序运镜数据..." 
+                   incomingAssets={incomingAssets}
+                   dataAttrs={{ 'data-node-id': id, 'data-field': 'prompt', 'data-field-label': '运镜时序轨' }}
+                />
                {data.prompt && (
                  <div className="mt-1 text-[9px] text-zinc-500 font-light px-1 flex items-center gap-1">
                    <CheckCircle size={10} className="text-green-500/70"/> 数据已接力，底层渲染时将自动与上方【美学参数】进行缝合。
@@ -2363,7 +2366,7 @@ export const MediaNode = ({ id, data, selected }: any) => {
                    ))}
                  </div>
                )}
-                    <MentionTextarea value={data.prompt || ''} onChange={(v: string) => updateNodeData(id, { prompt: v })} placeholder="输入提示词，或输入 @ 选择已连接的参考图参与融合..." incomingAssets={incomingAssets} disableMention={false} />
+                     <MentionTextarea value={data.prompt || ''} onChange={(v: string) => updateNodeData(id, { prompt: v })} placeholder="输入提示词，或输入 @ 选择已连接的参考图参与融合..." incomingAssets={incomingAssets} disableMention={false} dataAttrs={{ 'data-node-id': id, 'data-field': 'prompt', 'data-field-label': '生图提示词' }} />
                  </div>
                  <button onClick={() => setZenMode({ field: 'prompt', label: '生图提示词' })} className="absolute top-3 right-3 p-1.5 bg-black/60 backdrop-blur-md border border-white/10 rounded-lg opacity-0 group-hover/zen:opacity-100 text-zinc-400 hover:text-white hover:bg-white/10 transition-all shadow-md z-10">
                     <Expand size={14}/>
@@ -2665,12 +2668,13 @@ export const RenderNode = ({ id, data, selected }: any) => {
         <div className={`absolute top-[100%] pt-5 left-1/2 -translate-x-1/2 w-[540px] transition-all duration-500 ease-out opacity-0 -translate-y-4 pointer-events-none group-hover:opacity-100 group-hover:translate-y-0 group-hover:pointer-events-auto ${selected ? '!opacity-100 !translate-y-0 !pointer-events-auto' : ''}`}>
            <div className="bg-black/60 border border-white/[0.08] backdrop-blur-3xl rounded-[32px] p-3 shadow-[0_30px_80px_rgba(0,0,0,0.85)] focus-within:border-white/20 transition-all flex flex-col">
               
-              <MentionTextarea 
-                value={data.prompt || ''}
-                onChange={(v: string) => updateNodeData(id, { prompt: v })}
-                placeholder="描述运镜方式与视频动态细节，或输入 @ 引用镜头序列..."
-                incomingAssets={incomingAssets}
-              />
+               <MentionTextarea 
+                 value={data.prompt || ''}
+                 onChange={(v: string) => updateNodeData(id, { prompt: v })}
+                 placeholder="描述运镜方式与视频动态细节，或输入 @ 引用镜头序列..."
+                 incomingAssets={incomingAssets}
+                 dataAttrs={{ 'data-node-id': id, 'data-field': 'prompt', 'data-field-label': '视频提示词' }}
+               />
               
               <div className="flex items-center justify-between px-3 pb-2 pt-2 border-t border-white/5">
               <div className="flex items-center gap-2">

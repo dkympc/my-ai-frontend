@@ -21,6 +21,7 @@ interface AppState {
   activeCanvasProjectId: string | null;
   isSettingsModalOpen: boolean;
   isFilmControlOpen: boolean; // ✨ 新增：影视中控台抽屉开关状态
+  copilotIsOpen: boolean; // ✨ 新增：AI 副驾驶抽屉开关状态
   settings: AppSettings;
   toastMsg: string | null;
   outOfBalanceMsg: string | null;
@@ -29,6 +30,7 @@ interface AppState {
   setActiveCanvasProjectId: (id: string | null) => void;
   setIsSettingsModalOpen: (isOpen: boolean) => void;
   setIsFilmControlOpen: (isOpen: boolean) => void; // ✨ 新增：设置开关函数
+  setCopilotIsOpen: (isOpen: boolean) => void; // ✨ 新增：AI 副驾驶开关
   setSettings: (settings: AppSettings | ((prev: AppSettings) => AppSettings)) => void;
   setToastMsg: (msg: string | null) => void;
   setOutOfBalanceMsg: (msg: string | null) => void;
@@ -69,6 +71,7 @@ export const useAppStore = create<AppState>()(
       activeCanvasProjectId: null,
       isSettingsModalOpen: false,
       isFilmControlOpen: false, // ✨ 新增：中控台默认关闭
+      copilotIsOpen: false, // ✨ 新增：副驾驶默认关闭
       settings: {
         nickname: '', avatar: '', globalSystemPrompt: '', modelSystemPrompts: {},
         temperature: 0.7, topP: 1.0, maxTokens: ''
@@ -80,6 +83,7 @@ export const useAppStore = create<AppState>()(
       setActiveCanvasProjectId: (id) => set({ activeCanvasProjectId: id }),
       setIsSettingsModalOpen: (isOpen) => set({ isSettingsModalOpen: isOpen }),
       setIsFilmControlOpen: (isOpen) => set({ isFilmControlOpen: isOpen }), // ✨ 新增：中控台开关绑定
+      setCopilotIsOpen: (isOpen) => set({ copilotIsOpen: isOpen }), // ✨ 新增：副驾驶开关绑定
       setSettings: (updater) => set((state) => ({
         settings: typeof updater === 'function' ? updater(state.settings) : updater
       })),
@@ -100,7 +104,8 @@ export const useAppStore = create<AppState>()(
         })),
         activeView: state.activeView,
         activeCanvasProjectId: state.activeCanvasProjectId,
-        isFilmControlOpen: state.isFilmControlOpen // ✨ 核心修复：将抽屉开启状态加入白名单
+        isFilmControlOpen: state.isFilmControlOpen, // ✨ 核心修复：将抽屉开启状态加入白名单
+        copilotIsOpen: state.copilotIsOpen, // ✨ 副驾驶面板开关持久化
       }),
     }
   )
