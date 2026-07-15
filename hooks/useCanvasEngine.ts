@@ -10,61 +10,15 @@ const taskQueue: Array<{ nodeId: string, type: 'image' | 'video' | 'i2i', getNod
 const activeTasks = new Set<string>();
 const MAX_CONCURRENCY = 2; // 最大并发数：2，防止 API 封号
 
-export function useCanvasEngine() {
-  
-  // 内部核心：处理队列
-  const processQueue = async () => {
-    if (activeTasks.size >= MAX_CONCURRENCY || taskQueue.length === 0) return;
-
-    // 从队列头部取出一个任务
-    const task = taskQueue.shift();
-    if (!task) return;
-
-    activeTasks.add(task.nodeId);
-    
-    try {
-      if (task.type === 'image') {
-        await executeImageTask(task.nodeId, task.getNodes, task.updateNodeData, task.extraImageRefs);
-      } else if (task.type === 'video') {
-        await executeVideoTask(task.nodeId, task.getNodes, task.updateNodeData);
-      } else if (task.type === 'i2i') {
-        // ✨ 去脏重绘：结果写入右侧新 MediaNode，不覆盖源节点
-        await executeI2iTask(task.nodeId, task.getNodes, task.updateNodeData, task.i2iOptions!);
-      }
-    } finally {
-      // 无论成功失败，释放当前车道，并递归叫号下一个
-      activeTasks.delete(task.nodeId);
-      processQueue();
-    }
-  };
-
-  // 🚀 对外暴露的入队方法
-  // 对于 i2i 去脏重绘：不标记源节点为 generating（源节点不变），结果会写入 targetNodeId 指定的新节点
-  const enqueueTask = (nodeId: string, type: 'image' | 'video' | 'i2i', getNodes: any, updateNodeData: any, extraImageRefs?: string[], i2iOptions?: I2iOptions) => {
-    if (type !== 'i2i') {
-      // 普通生图/视频：标记本节点进入"排队"状态
-      updateNodeData(nodeId, { status: 'pending', isGenerating: true });
-    } else if (i2iOptions) {
-      // 去脏重绘：标记右侧新结果节点为排队中
-      updateNodeData(i2iOptions.targetNodeId, { status: 'pending', isGenerating: true });
-    }
-    taskQueue.push({ nodeId, type, getNodes, updateNodeData, extraImageRefs, i2iOptions });
-    useAppStore.getState().setToastMsg(`🚦 节点已加入${type === 'image' ? '生图' : type === 'video' ? '渲染' : '去脏重绘'}队列 (排队中: ${taskQueue.length})`);
-    
-    // 呼叫交通灯检查是否可以放行
-    processQueue();
-  };
-
-  // ==========================================
-  // ==========================================
-  // 🛡️ 核心中间件：Payload 组装与参数翻译 (Middleware Adapter)
-  // ==========================================
-  const buildImagePayload = (data: any, settings: any, externalRefs?: string[]) => {
+// ==========================================
+// ★★★ 独立导出：Payload 组装中间件（供 AssetTableNode 等外部组件复用）
+// ==========================================
+export function buildImagePayload(data: any, settings: any, externalRefs?: string[]) {
     // 1. 风格拦截与覆写逻辑
     const styleOverride = data.styleOverride || '继承全局预设';
     let finalStyle = '';
     
-    // 🚨 核心切断：如果是“继承全局预设”（即没有强选下拉框里的电影/二次元），我们什么都不拼！保持 prompt 的绝对纯净和所见即所得！
+    // 🚨 核心切断：如果是"继承全局预设"（即没有强选下拉框里的电影/二次元），我们什么都不拼！保持 prompt 的绝对纯净和所见即所得！
     if (styleOverride === '继承全局预设') {
         finalStyle = ''; 
       } else if (styleOverride === '🎬 电影质感') {
@@ -211,7 +165,58 @@ export function useCanvasEngine() {
       ...extraParams,
       ...(refImages.length > 0 ? { image: refImages[0], images: refImages } : {})
     };
+}
+
+export function useCanvasEngine() {
+  
+  // 内部核心：处理队列
+  const processQueue = async () => {
+    if (activeTasks.size >= MAX_CONCURRENCY || taskQueue.length === 0) return;
+
+    // 从队列头部取出一个任务
+    const task = taskQueue.shift();
+    if (!task) return;
+
+    activeTasks.add(task.nodeId);
+    
+    try {
+      if (task.type === 'image') {
+        await executeImageTask(task.nodeId, task.getNodes, task.updateNodeData, task.extraImageRefs);
+      } else if (task.type === 'video') {
+        await executeVideoTask(task.nodeId, task.getNodes, task.updateNodeData);
+      } else if (task.type === 'i2i') {
+        // ✨ 去脏重绘：结果写入右侧新 MediaNode，不覆盖源节点
+        await executeI2iTask(task.nodeId, task.getNodes, task.updateNodeData, task.i2iOptions!);
+      }
+    } finally {
+      // 无论成功失败，释放当前车道，并递归叫号下一个
+      activeTasks.delete(task.nodeId);
+      processQueue();
+    }
   };
+
+  // 🚀 对外暴露的入队方法
+  // 对于 i2i 去脏重绘：不标记源节点为 generating（源节点不变），结果会写入 targetNodeId 指定的新节点
+  const enqueueTask = (nodeId: string, type: 'image' | 'video' | 'i2i', getNodes: any, updateNodeData: any, extraImageRefs?: string[], i2iOptions?: I2iOptions) => {
+    if (type !== 'i2i') {
+      // 普通生图/视频：标记本节点进入"排队"状态
+      updateNodeData(nodeId, { status: 'pending', isGenerating: true });
+    } else if (i2iOptions) {
+      // 去脏重绘：标记右侧新结果节点为排队中
+      updateNodeData(i2iOptions.targetNodeId, { status: 'pending', isGenerating: true });
+    }
+    taskQueue.push({ nodeId, type, getNodes, updateNodeData, extraImageRefs, i2iOptions });
+    useAppStore.getState().setToastMsg(`🚦 节点已加入${type === 'image' ? '生图' : type === 'video' ? '渲染' : '去脏重绘'}队列 (排队中: ${taskQueue.length})`);
+    
+    // 呼叫交通灯检查是否可以放行
+    processQueue();
+  };
+
+  // ==========================================
+  // ==========================================
+  // 🛡️ 核心中间件：Payload 组装与参数翻译 (Middleware Adapter)
+  // ★ 已提升为模块级导出函数 buildImagePayload，供外部组件复用
+  // ==========================================
 
   const buildVideoPayload = (data: any, settings: any) => {
     // 导演路由引擎：优先读取裂变时预计算好的结构化导演上下文
