@@ -118,8 +118,8 @@ export default function CopilotPanel({ isOpen, onClose, copilot }: CopilotPanelP
         'info'
       );
       if (confirmed) {
-        // 尝试本地再次解析（LLM 可能已经帮我们确认了意图）
-        const reIntent = parseUserIntent(text);
+        // ★ 核心修复：优先解析 LLM 的回复文本（AI理解后可产生更准确匹配），回退到原始用户输入
+        const reIntent = parseUserIntent(result.message) || parseUserIntent(text);
         if (reIntent) {
           const count = executeLocalIntent(reIntent);
           setToastMsg(`✅ 创作助手已完成 ${count} 处修改`);

@@ -31,48 +31,66 @@ export default function SelectionAssist() {
   const [chatInput, setChatInput] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // ★ 全局 mouseup 监听
-  const handleGlobalMouseUp = useCallback((e: MouseEvent) => {
-    setTimeout(() => {
+  // ★ 核心修复：不用 window.getSelection()（在 React Flow 中不可靠）
+  //   改用 textarea.selectionStart/selectionEnd 直接读取选区状态
+  useEffect(() => {
+    const handleMouseUp = () => {
       const el = document.activeElement;
       if (!(el instanceof HTMLTextAreaElement) && !(el instanceof HTMLInputElement)) {
         setSelection(null);
         return;
       }
-      const sel = window.getSelection();
-      if (!sel || sel.isCollapsed || !sel.toString().trim()) {
-        setSelection(null);
-        return;
-      }
-      const selectedText = sel.toString().trim();
+
+      const start = el.selectionStart ?? 0;
+      const end = el.selectionEnd ?? 0;
+      if (start === end) { setSelection(null); return; }
+
+      const selectedText = el.value.substring(start, end).trim();
+      if (!selectedText) { setSelection(null); return; }
+
       const fullText = el.value;
       const nodeId = el.getAttribute('data-node-id') || '';
       const fieldName = el.getAttribute('data-field') || '';
       const fieldLabel = el.getAttribute('data-field-label') || fieldName;
       if (!nodeId || !fieldName) { setSelection(null); return; }
 
-      const range = sel.getRangeAt(0);
-      const rect = range.getBoundingClientRect();
-      setToolbarPos({ x: rect.left + rect.width / 2, y: rect.top - 10 });
+      // ★ 坐标：优先用鼠标位置，回退到 textarea 顶部
+      let x = 0, y = 0;
+      try {
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount > 0) {
+          const rangeRect = sel.getRangeAt(0).getBoundingClientRect();
+          if (rangeRect.width > 0) {
+            x = rangeRect.left + rangeRect.width / 2;
+            y = rangeRect.top - 10;
+          }
+        }
+      } catch { /* ignore */ }
+      // fallback：如果 Range 不可用（React Flow 中常见），定位到 textarea 顶部
+      if (x === 0 && y === 0) {
+        const elRect = el.getBoundingClientRect();
+        x = elRect.left + elRect.width / 2;
+        y = elRect.top - 6;
+      }
+
+      setToolbarPos({ x, y });
       setSelection({ selectedText, fullText, nodeId, fieldName, fieldLabel, element: el });
       setShowResult(false);
       setAiReply('');
       setMode('toolbar');
       setChatMessages([]);
       setChatInput('');
-    }, 10);
-  }, []);
+    };
 
-  useEffect(() => {
-    document.addEventListener('mouseup', handleGlobalMouseUp);
-    return () => document.removeEventListener('mouseup', handleGlobalMouseUp);
-  }, [handleGlobalMouseUp]);
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => document.removeEventListener('mouseup', handleMouseUp);
+  }, []);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
-  // ★ 改写模式：一次调用 LLM
+  // ★ 改写模式：SSE 流式改写，逐字展示结果
   const handleAIRewrite = async () => {
     if (!selection || isLoading) return;
     setIsLoading(true);
@@ -90,12 +108,32 @@ export default function SelectionAssist() {
         body: JSON.stringify({
           model: 'gpt-5.4',
           messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: `请改写：${selection.selectedText}` }],
-          stream: false,
+          stream: true,
         }),
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
-      setAiReply((data.choices?.[0]?.message?.content || '').trim());
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('无法读取响应流');
+      const decoder = new TextDecoder();
+      let fullText = '', buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data:')) continue;
+          const jsonStr = trimmed.slice(5).trim();
+          if (jsonStr === '[DONE]') continue;
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const content = parsed.choices?.[0]?.delta?.content || '';
+            if (content) { fullText += content; setAiReply(fullText); }
+          } catch {}
+        }
+      }
     } catch (error: any) {
       console.error('[SelectionAI Error] 改写失败:', error);
       setAiReply(`⚠️ ${error.message}`);
@@ -112,6 +150,7 @@ export default function SelectionAssist() {
     }]);
   };
 
+  // ★ 对话模式：SSE 流式多轮对话
   const handleChatSend = async () => {
     if (!selection || !chatInput.trim() || isLoading) return;
     const userMsg = chatInput.trim();
@@ -139,21 +178,57 @@ export default function SelectionAssist() {
         body: JSON.stringify({
           model: 'gpt-5.4',
           messages: [{ role: 'system', content: systemPrompt }, ...history, { role: 'user', content: userMsg }],
-          stream: false,
+          stream: true,
         }),
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
-      const rawContent = data.choices?.[0]?.message?.content || '';
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('无法读取响应流');
+      const decoder = new TextDecoder();
+      let fullText = '', buffer = '';
+      // ★ 流式过程中实时显示 AI 回复
+      setChatMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data:')) continue;
+          const jsonStr = trimmed.slice(5).trim();
+          if (jsonStr === '[DONE]') continue;
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const content = parsed.choices?.[0]?.delta?.content || '';
+            if (content) {
+              fullText += content;
+              setChatMessages(prev => {
+                const updated = [...prev];
+                const last = updated[updated.length - 1];
+                if (last && last.role === 'assistant') {
+                  updated[updated.length - 1] = { ...last, content: fullText };
+                }
+                return updated;
+              });
+            }
+          } catch {}
+        }
+      }
       // 分离对话文本和修改建议
-      const suggestIdx = rawContent.indexOf('【建议修改】');
-      const chatContent = suggestIdx > -1 ? rawContent.slice(0, suggestIdx).trim() : rawContent;
-      const suggestion = suggestIdx > -1 ? rawContent.slice(suggestIdx + 6).trim() : '';
+      const suggestIdx = fullText.indexOf('【建议修改】');
+      const chatContent = suggestIdx > -1 ? fullText.slice(0, suggestIdx).trim() : fullText;
+      const suggestion = suggestIdx > -1 ? fullText.slice(suggestIdx + 6).trim() : '';
 
-      setChatMessages(prev => [...prev, {
-        role: 'assistant',
-        content: chatContent || rawContent,
-      }]);
+      setChatMessages(prev => {
+        const updated = [...prev];
+        const last = updated[updated.length - 1];
+        if (last && last.role === 'assistant') {
+          updated[updated.length - 1] = { ...last, content: chatContent || fullText };
+        }
+        return updated;
+      });
       if (suggestion) {
         setAiReply(suggestion);
         setShowResult(true);

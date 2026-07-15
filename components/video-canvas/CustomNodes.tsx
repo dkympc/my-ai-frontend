@@ -54,8 +54,54 @@ const forceDownload = async (url: string, filename: string) => {
   }
 };
 
+// ★★★ SSE 流式聊天辅助函数 — 解决 stream:false 导致完整缓冲等待、用户感觉"卡死"的问题
+// 原理：用 SSE 逐 chunk 读取，同时通过 onChunk 回调实时展示生成进度
+const fetchStreamingChat = async (payload: any, onChunk?: (text: string) => void): Promise<string> => {
+  const token = localStorage.getItem('yr-ai-token');
+  const response = await fetch('/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify({ ...payload, stream: true }),
+  });
+  if (!response.ok) {
+    const errText = await response.text().catch(() => '');
+    throw new Error(`HTTP ${response.status}: ${errText}`);
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error('[Stream Error] 无法读取响应流');
+
+  const decoder = new TextDecoder();
+  let fullText = '';
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith('data:')) continue;
+      const jsonStr = trimmed.slice(5).trim();
+      if (jsonStr === '[DONE]') continue;
+      try {
+        const parsed = JSON.parse(jsonStr);
+        const content = parsed.choices?.[0]?.delta?.content || '';
+        if (content) {
+          fullText += content;
+          if (onChunk) onChunk(fullText);
+        }
+      } catch { /* 忽略解析失败的行 */ }
+    }
+  }
+
+  return fullText;
+};
+
 // ✨ 高级黑玻璃禅定编辑器 (Zen Mode)
-const ZenEditor = ({ value, onChange, label, onClose, placeholder, onWheelCapture, incomingAssets = [] }: any) => {
+const ZenEditor = ({ value, onChange, label, onClose, placeholder, onWheelCapture, incomingAssets = [], dataAttrs = {} }: any) => {
   return createPortal(
     <div className="fixed inset-0 z-[999999] flex items-center justify-center p-12 bg-black/60 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-300" onClick={onClose}>
        <div className="w-full max-w-[1000px] h-[80vh] flex flex-col bg-[#050505]/90 border border-white/10 rounded-[32px] shadow-[0_50px_100px_rgba(0,0,0,1)] overflow-hidden" onClick={e => e.stopPropagation()}>
@@ -70,7 +116,7 @@ const ZenEditor = ({ value, onChange, label, onClose, placeholder, onWheelCaptur
               .zen-mode-container > div { height: 100%; display: flex; flex-direction: column; }
               .zen-mode-container textarea { flex: 1; height: 100% !important; overflow-y: auto !important; font-size: 16px !important; line-height: 1.8 !important; }
             `}} />
-            <MentionTextarea value={value} onChange={onChange} placeholder={placeholder || "进入心流模式编写..."} incomingAssets={incomingAssets} />
+            <MentionTextarea value={value} onChange={onChange} placeholder={placeholder || "进入心流模式编写..."} incomingAssets={incomingAssets} dataAttrs={dataAttrs} />
           </div>
           <div className="px-6 py-4 border-t border-white/10 bg-white/[0.01] flex justify-end">
              <button onClick={onClose} className="px-8 py-3 bg-white text-black text-[13px] font-bold rounded-full shadow-[0_0_20px_rgba(255,255,255,0.2)] hover:scale-105 transition-all">保存并返回</button>
@@ -317,9 +363,11 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
         ]
       };
 
-      const response = await fetchApi('/v1/chat/completions', { method: 'POST', body: JSON.stringify({ ...payload, stream: false }) });
-      const resData = await response.json();
-      const cameraParams = resData.choices?.[0]?.message?.content?.trim() || "Shot on 35mm lens, cinematic lighting, 8k resolution";
+      // ★ 改为流式请求：用户实时看到生成进度，不再干等转圈
+      const cameraParams = (await fetchStreamingChat(payload, (text) => {
+        const preview = text.length > 50 ? '...' + text.slice(-50) : text;
+        useAppStore.getState().setToastMsg(`📷 摄影机参数生成中... ${preview}`);
+      })).trim() || "Shot on 35mm lens, cinematic lighting, 8k resolution";
       
       updateNodeData(id, { globalCamera: cameraParams, model: targetModel });
       useAppStore.getState().setToastMsg(`✅ 全局摄影机 & 调性已锁定！`);
@@ -388,9 +436,11 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
         ] 
       };
       
-      const response = await fetchApi('/v1/chat/completions', { method: 'POST', body: JSON.stringify({ ...payload, stream: false }) });
-      const resData = await response.json();
-      const rawContent = resData.choices?.[0]?.message?.content || "";
+      // ★ 改为流式请求：资产表提取实时展示进度
+      const rawContent = await fetchStreamingChat(payload, (text) => {
+        const preview = text.length > 60 ? '...' + text.slice(-60) : text;
+        useAppStore.getState().setToastMsg(`📋 资产数据提取中... ${preview}`);
+      });
       
       let cleanJson = rawContent;
       const match = rawContent.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
@@ -583,11 +633,12 @@ ${directorCtx?.llmContextBlock || ''}`
         ]
       };
 
-      const res1 = await fetchApi('/v1/chat/completions', { method: 'POST', body: JSON.stringify({ ...payloadStage1, stream: false }) });
-      const data1 = await res1.json();
-      if (!res1.ok || data1.error) throw new Error(`阶段1请求失败: ${data1.error?.message || res1.statusText}`);
-      
-      const raw1 = data1.choices?.[0]?.message?.content || "";
+      // ★ 改为流式请求：分镜裂变运行时实时展示 LLM 思考过程
+      const raw1 = await fetchStreamingChat(payloadStage1, (text) => {
+        const preview = text.length > 80 ? '...' + text.slice(-80) : text;
+        useAppStore.getState().setToastMsg(`🧩 阶段 1/2 分镜拆解中... ${preview}`);
+      });
+      if (!raw1) throw new Error("阶段1：LLM未返回有效内容");
       let cleanJson1 = raw1;
       const match1 = raw1.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
       if (match1) {
@@ -662,11 +713,12 @@ ${directorCtx?.llmContextBlock || ''}`
         ]
       };
 
-      const res2 = await fetchApi('/v1/chat/completions', { method: 'POST', body: JSON.stringify({ ...payloadStage2, stream: false }) });
-      const data2 = await res2.json();
-      if (!res2.ok || data2.error) throw new Error(`阶段2请求失败: ${data2.error?.message || res2.statusText}`);
-
-      const raw2 = data2.choices?.[0]?.message?.content || "";
+      // ★ 改为流式请求：首帧提取实时展示进度
+      const raw2 = await fetchStreamingChat(payloadStage2, (text) => {
+        const preview = text.length > 80 ? '...' + text.slice(-80) : text;
+        useAppStore.getState().setToastMsg(`🎨 阶段 2/2 首帧提取中... ${preview}`);
+      });
+      if (!raw2) throw new Error("阶段2：LLM未返回有效内容");
       let cleanJson2 = raw2;
       const match2 = raw2.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
       if (match2) {
@@ -925,6 +977,7 @@ ${directorCtx?.llmContextBlock || ''}`
                  全局摄影机预设 (Global Camera) <Settings2 size={12} className="text-zinc-400 group-hover/cam:rotate-90 transition-transform duration-500"/>
                </label>
                <textarea 
+                 data-node-id={id} data-field="globalCamera" data-field-label="全局摄影机预设"
                  className="bg-transparent border border-white/[0.05] rounded-[8px] p-2 focus:border-white/30 focus:bg-white/[0.02] text-[12px] text-zinc-300 outline-none w-full font-mono transition-colors nodrag nopan resize-none custom-scrollbar"
                  rows={3} value={data.globalCamera} onChange={(e) => updateNodeData(id, { globalCamera: e.target.value })} onWheelCapture={(e) => { if (!e.ctrlKey && !e.metaKey) e.stopPropagation(); }}
                />
@@ -1299,7 +1352,7 @@ export const ShotNode = ({ id, data, selected }: any) => {
         </div>
       )}
       
-      {zenMode && <ZenEditor label={zenMode.label} value={data[zenMode.field] || ''} onChange={(val: string) => updateNodeData(id, { [zenMode.field]: val })} onClose={() => setZenMode(null)} />}
+      {zenMode && <ZenEditor label={zenMode.label} value={data[zenMode.field] || ''} onChange={(val: string) => updateNodeData(id, { [zenMode.field]: val })} onClose={() => setZenMode(null)} dataAttrs={{ 'data-node-id': id, 'data-field': zenMode.field, 'data-field-label': zenMode.label }} />}
 
       <div className={`relative rounded-[24px] bg-[#18181b]/80 backdrop-blur-3xl border ${selected ? 'border-white/30 shadow-2xl' : 'border-white/[0.08]'} flex flex-col p-2 transition-all duration-500`}>
         <div className="flex items-center justify-between px-2 pt-1 pb-2">
@@ -1703,7 +1756,7 @@ export const VideoClipNode = ({ id, data, selected }: any) => {
       <Handle type="target" position={Position.Left} id="left" className={handleLeft} /> 
       <Handle type="source" position={Position.Right} id="right" className={handleRight} /> 
             {/* ✨ 禅定编辑器挂载 */}
-            {zenMode && <ZenEditor label={zenMode.label} value={data[zenMode.field] || ''} onChange={(val: string) => updateNodeData(id, { [zenMode.field]: val })} onClose={() => setZenMode(null)} />}
+            {zenMode && <ZenEditor label={zenMode.label} value={data[zenMode.field] || ''} onChange={(val: string) => updateNodeData(id, { [zenMode.field]: val })} onClose={() => setZenMode(null)} dataAttrs={{ 'data-node-id': id, 'data-field': zenMode.field, 'data-field-label': zenMode.label }} />}
       
       {/* ✨ 移到顶部的悬浮操作舱 (包含高级选项与下载) */}
       {status === 'done' && data.videoUrl && (
@@ -1910,7 +1963,8 @@ export const VideoClipNode = ({ id, data, selected }: any) => {
                      <div className="flex flex-col gap-2 mt-1 animate-in fade-in slide-in-from-top-1 duration-300">
                         <div className="flex flex-col gap-1">
                         <span className="text-[9px] text-zinc-500 font-mono tracking-widest">微调单场光影 [Scene Lighting]:</span>
-                           <textarea 
+                           <textarea
+                              data-node-id={id} data-field="sceneLighting" data-field-label="场景光影"
                               className="w-full bg-black/60 border border-white/5 rounded-[8px] p-2 text-[10px] text-zinc-200 font-mono outline-none focus:border-white/20 nodrag nopan resize-none custom-scrollbar" 
                               rows={2} 
                               value={data.sceneLighting || ''} 
@@ -1920,7 +1974,8 @@ export const VideoClipNode = ({ id, data, selected }: any) => {
                         </div>
                         <div className="flex flex-col gap-1">
                            <span className="text-[9px] text-zinc-500 font-mono tracking-widest">微调全片机位 [Global Camera]:</span>
-                           <textarea 
+                           <textarea
+                              data-node-id={id} data-field="globalCamera" data-field-label="全片摄影机机位"
                               className="w-full bg-black/60 border border-white/5 rounded-[8px] p-2 text-[10px] text-zinc-200 font-mono outline-none focus:border-white/20 nodrag nopan resize-none custom-scrollbar" 
                               rows={2} 
                               value={data.globalCamera || ''} 
@@ -2186,7 +2241,7 @@ export const MediaNode = ({ id, data, selected }: any) => {
     <div className="relative z-20 group">
       {!isReferenceOnly && <Handle type="target" position={Position.Left} id="left" className={handleLeft} />}
       <Handle type="source" position={Position.Right} id="right" className={handleRight} />
-      {zenMode && <ZenEditor label={zenMode.label} value={data[zenMode.field] || ''} onChange={(val: string) => updateNodeData(id, { [zenMode.field]: val })} onClose={() => setZenMode(null)} incomingAssets={incomingAssets} />}
+      {zenMode && <ZenEditor label={zenMode.label} value={data[zenMode.field] || ''} onChange={(val: string) => updateNodeData(id, { [zenMode.field]: val })} onClose={() => setZenMode(null)} incomingAssets={incomingAssets} dataAttrs={{ 'data-node-id': id, 'data-field': zenMode.field, 'data-field-label': zenMode.label }} />}
 
       {displayImage && (
         <div className="absolute -top-[52px] left-1/2 -translate-x-1/2 flex items-center p-1.5 bg-[#0a0a0c]/90 backdrop-blur-3xl border border-white/[0.08] rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.8)] opacity-0 group-hover:opacity-100 transition-all duration-300 pointer-events-none group-hover:pointer-events-auto z-[100] scale-95 group-hover:scale-100 after:content-[''] after:absolute after:-bottom-6 after:left-0 after:w-full after:h-6">
@@ -2772,13 +2827,13 @@ export const ScriptTableNode = ({ id, data, selected }: any) => {
     updateNodeData(id, { rows: [...data.rows, newRow] });
   };
 
-  const InputField = ({ label, value, onChange, isTextArea = false }: any) => (
+  const InputField = ({ label, value, onChange, isTextArea = false, field = '', nodeId = '' }: any) => (
     <div className="flex flex-col gap-1 w-full">
       <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest pl-0.5">{label}</span>
       {isTextArea ? (
-        <textarea className="w-full bg-black/40 border border-white/[0.05] focus:border-white/20 rounded-[8px] p-2 text-[11px] text-zinc-200 outline-none resize-none custom-scrollbar nodrag nopan transition-colors min-h-[48px]" value={value} onChange={(e) => onChange(e.target.value)} onWheelCapture={(e) => { if (!e.ctrlKey && !e.metaKey) e.stopPropagation(); }} />
+        <textarea data-node-id={nodeId} data-field={field} data-field-label={label} className="w-full bg-black/40 border border-white/[0.05] focus:border-white/20 rounded-[8px] p-2 text-[11px] text-zinc-200 outline-none resize-none custom-scrollbar nodrag nopan transition-colors min-h-[48px]" value={value} onChange={(e) => onChange(e.target.value)} onWheelCapture={(e) => { if (!e.ctrlKey && !e.metaKey) e.stopPropagation(); }} />
       ) : (
-        <input className="w-full bg-black/40 border border-white/[0.05] focus:border-white/20 rounded-[8px] p-2 text-[11px] text-zinc-200 outline-none nodrag nopan transition-colors h-[30px]" value={value} onChange={(e) => onChange(e.target.value)} />
+        <input data-node-id={nodeId} data-field={field} data-field-label={label} className="w-full bg-black/40 border border-white/[0.05] focus:border-white/20 rounded-[8px] p-2 text-[11px] text-zinc-200 outline-none nodrag nopan transition-colors h-[30px]" value={value} onChange={(e) => onChange(e.target.value)} />
       )}
     </div>
   );
@@ -2840,15 +2895,15 @@ export const ScriptTableNode = ({ id, data, selected }: any) => {
                           <span className="text-[10px] font-bold text-indigo-400/80 tracking-widest uppercase">生视频运镜参数 (Video Track)</span>
                        </div>
                        <div className="grid grid-cols-4 gap-2">
-                          <InputField label="镜号" value={row.shotNumber} onChange={(v:any) => updateRow(row.id, 'shotNumber', v)} />
-                          <InputField label="时长" value={row.duration} onChange={(v:any) => updateRow(row.id, 'duration', v)} />
-                          <InputField label="机位" value={row.camera} onChange={(v:any) => updateRow(row.id, 'camera', v)} />
-                          <InputField label="景别" value={row.shotType} onChange={(v:any) => updateRow(row.id, 'shotType', v)} />
+                          <InputField label="镜号" value={row.shotNumber} onChange={(v:any) => updateRow(row.id, 'shotNumber', v)} field="shotNumber" nodeId={id} />
+                          <InputField label="时长" value={row.duration} onChange={(v:any) => updateRow(row.id, 'duration', v)} field="duration" nodeId={id} />
+                          <InputField label="机位" value={row.camera} onChange={(v:any) => updateRow(row.id, 'camera', v)} field="camera" nodeId={id} />
+                          <InputField label="景别" value={row.shotType} onChange={(v:any) => updateRow(row.id, 'shotType', v)} field="shotType" nodeId={id} />
                        </div>
-                       <InputField label="出场角色" value={row.characters} onChange={(v:any) => updateRow(row.id, 'characters', v)} />
-                       <InputField label="运镜与演进 (Movement)" value={row.movement} isTextArea onChange={(v:any) => updateRow(row.id, 'movement', v)} />
-                       <InputField label="物理动作描述 (Action)" value={row.videoDesc} isTextArea onChange={(v:any) => updateRow(row.id, 'videoDesc', v)} />
-                       <InputField label="音效设计" value={row.audio} onChange={(v:any) => updateRow(row.id, 'audio', v)} />
+                       <InputField label="出场角色" value={row.characters} onChange={(v:any) => updateRow(row.id, 'characters', v)} field="characters" nodeId={id} />
+                       <InputField label="运镜与演进 (Movement)" value={row.movement} isTextArea onChange={(v:any) => updateRow(row.id, 'movement', v)} field="movement" nodeId={id} />
+                       <InputField label="物理动作描述 (Action)" value={row.videoDesc} isTextArea onChange={(v:any) => updateRow(row.id, 'videoDesc', v)} field="videoDesc" nodeId={id} />
+                       <InputField label="音效设计" value={row.audio} onChange={(v:any) => updateRow(row.id, 'audio', v)} field="audio" nodeId={id} />
                     </div>
 
                     {/* 右侧：首帧图属性 (Image Track) */}
@@ -2859,13 +2914,13 @@ export const ScriptTableNode = ({ id, data, selected }: any) => {
                           <span className="text-[10px] font-bold text-amber-400/80 tracking-widest uppercase">生图首帧参数 (Image Track)</span>
                        </div>
                        <div className="grid grid-cols-3 gap-2">
-                          <InputField label="场景" value={row.imgScene} onChange={(v:any) => updateRow(row.id, 'imgScene', v)} />
-                          <InputField label="景别" value={row.imgShotType} onChange={(v:any) => updateRow(row.id, 'imgShotType', v)} />
-                          <InputField label="情绪" value={row.imgEmotion} onChange={(v:any) => updateRow(row.id, 'imgEmotion', v)} />
+                          <InputField label="场景" value={row.imgScene} onChange={(v:any) => updateRow(row.id, 'imgScene', v)} field="imgScene" nodeId={id} />
+                          <InputField label="景别" value={row.imgShotType} onChange={(v:any) => updateRow(row.id, 'imgShotType', v)} field="imgShotType" nodeId={id} />
+                          <InputField label="情绪" value={row.imgEmotion} onChange={(v:any) => updateRow(row.id, 'imgEmotion', v)} field="imgEmotion" nodeId={id} />
                        </div>
-                       <InputField label="角色" value={row.imgCharacters} onChange={(v:any) => updateRow(row.id, 'imgCharacters', v)} />
-                       <InputField label="静帧动作与站位 (Pose & Blocking)" value={row.imgDesc} isTextArea onChange={(v:any) => updateRow(row.id, 'imgDesc', v)} />
-                       <InputField label="拼合生图提示词 (Final Prompt)" value={row.imgPrompt} isTextArea onChange={(v:any) => updateRow(row.id, 'imgPrompt', v)} />
+                       <InputField label="角色" value={row.imgCharacters} onChange={(v:any) => updateRow(row.id, 'imgCharacters', v)} field="imgCharacters" nodeId={id} />
+                       <InputField label="静帧动作与站位 (Pose & Blocking)" value={row.imgDesc} isTextArea onChange={(v:any) => updateRow(row.id, 'imgDesc', v)} field="imgDesc" nodeId={id} />
+                       <InputField label="拼合生图提示词 (Final Prompt)" value={row.imgPrompt} isTextArea onChange={(v:any) => updateRow(row.id, 'imgPrompt', v)} field="imgPrompt" nodeId={id} />
                     </div>
                  </div>
               </div>
@@ -3089,8 +3144,9 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
   const theme = getTheme();
   const Icon = theme.icon;
 
-  const InputField = ({ value, onChange, placeholder }: any) => (
-    <textarea 
+  const InputField = ({ value, onChange, placeholder, field = '', nodeId = '' }: any) => (
+    <textarea
+      data-node-id={nodeId} data-field={field} data-field-label={placeholder || field}
       className="w-full h-full min-h-[100px] bg-black/40 border border-white/5 focus:border-white/20 hover:bg-white/[0.02] rounded-[8px] p-2 text-[11px] text-zinc-300 outline-none resize-none custom-scrollbar nodrag nopan transition-colors" 
       value={value || ''} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />
   );
@@ -3102,7 +3158,7 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
       
       {/* 禅定放大编辑器 / 图片放大查看器 */}
       {zenMode && zenMode.type === 'text' && (
-        <ZenEditor label={zenMode.label} value={data.rows?.find((r:any)=>r.id===zenMode.rowId)?.[zenMode.field] || ''} onChange={(val: string) => updateRow(zenMode.rowId, zenMode.field, val)} onClose={() => setZenMode(null)} />
+        <ZenEditor label={zenMode.label} value={data.rows?.find((r:any)=>r.id===zenMode.rowId)?.[zenMode.field] || ''} onChange={(val: string) => updateRow(zenMode.rowId, zenMode.field, val)} onClose={() => setZenMode(null)} dataAttrs={{ 'data-node-id': id, 'data-field': zenMode.field, 'data-field-label': zenMode.label }} />
       )}
       {zenMode && zenMode.type === 'image' && createPortal(
         <div className="fixed inset-0 z-[999999] flex items-center justify-center bg-black/90 backdrop-blur-md p-8" onClick={() => setZenMode(null)}>
@@ -3180,26 +3236,26 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
                 
                 {/* 各种业务列 */}
                 {type === 'scene' && (
-                  <><div className="w-[10%]"><InputField value={row.name} placeholder="场景名" onChange={(v:any) => updateRow(row.id, 'name', v)} /></div>
-                  <div className="w-[8%]"><InputField value={row.time} placeholder="时间" onChange={(v:any) => updateRow(row.id, 'time', v)} /></div>
-                  <div className="w-[15%]"><InputField value={row.lighting} placeholder="光影" onChange={(v:any) => updateRow(row.id, 'lighting', v)} /></div>
-                  <div className="w-[10%]"><InputField value={row.stage} placeholder="阶段" onChange={(v:any) => updateRow(row.id, 'stage', v)} /></div></>
+                  <><div className="w-[10%]"><InputField value={row.name} placeholder="场景名" onChange={(v:any) => updateRow(row.id, 'name', v)} field="name" nodeId={id} /></div>
+                  <div className="w-[8%]"><InputField value={row.time} placeholder="时间" onChange={(v:any) => updateRow(row.id, 'time', v)} field="time" nodeId={id} /></div>
+                  <div className="w-[15%]"><InputField value={row.lighting} placeholder="光影" onChange={(v:any) => updateRow(row.id, 'lighting', v)} field="lighting" nodeId={id} /></div>
+                  <div className="w-[10%]"><InputField value={row.stage} placeholder="阶段" onChange={(v:any) => updateRow(row.id, 'stage', v)} field="stage" nodeId={id} /></div></>
                 )}
                 {type === 'character' && (
-                  <><div className="w-[8%]"><InputField value={row.name} placeholder="人物名" onChange={(v:any) => updateRow(row.id, 'name', v)} /></div>
-                  <div className="w-[5%]"><InputField value={row.age} placeholder="年龄" onChange={(v:any) => updateRow(row.id, 'age', v)} /></div>
-                  <div className="w-[15%]"><InputField value={row.clothing} placeholder="着装" onChange={(v:any) => updateRow(row.id, 'clothing', v)} /></div>
-                  <div className="w-[12%]"><InputField value={row.traits} placeholder="特质" onChange={(v:any) => updateRow(row.id, 'traits', v)} /></div>
-                  <div className="w-[8%]"><InputField value={row.stage} placeholder="阶段" onChange={(v:any) => updateRow(row.id, 'stage', v)} /></div></>
+                  <><div className="w-[8%]"><InputField value={row.name} placeholder="人物名" onChange={(v:any) => updateRow(row.id, 'name', v)} field="name" nodeId={id} /></div>
+                  <div className="w-[5%]"><InputField value={row.age} placeholder="年龄" onChange={(v:any) => updateRow(row.id, 'age', v)} field="age" nodeId={id} /></div>
+                  <div className="w-[15%]"><InputField value={row.clothing} placeholder="着装" onChange={(v:any) => updateRow(row.id, 'clothing', v)} field="clothing" nodeId={id} /></div>
+                  <div className="w-[12%]"><InputField value={row.traits} placeholder="特质" onChange={(v:any) => updateRow(row.id, 'traits', v)} field="traits" nodeId={id} /></div>
+                  <div className="w-[8%]"><InputField value={row.stage} placeholder="阶段" onChange={(v:any) => updateRow(row.id, 'stage', v)} field="stage" nodeId={id} /></div></>
                 )}
                 {type === 'prop' && (
-                  <><div className="w-[12%]"><InputField value={row.name} placeholder="道具名" onChange={(v:any) => updateRow(row.id, 'name', v)} /></div>
-                  <div className="w-[15%]"><InputField value={row.stage} placeholder="阶段" onChange={(v:any) => updateRow(row.id, 'stage', v)} /></div></>
+                  <><div className="w-[12%]"><InputField value={row.name} placeholder="道具名" onChange={(v:any) => updateRow(row.id, 'name', v)} field="name" nodeId={id} /></div>
+                  <div className="w-[15%]"><InputField value={row.stage} placeholder="阶段" onChange={(v:any) => updateRow(row.id, 'stage', v)} field="stage" nodeId={id} /></div></>
                 )}
 
                 {/* ✨ 统一的生图提示词编辑列 (带放大按钮) */}
                 <div className={`${type === 'scene' ? 'w-[30%]' : type === 'character' ? 'w-[25%]' : 'w-[46%]'} relative group/prompt`}>
-                   <InputField value={row.prompt} placeholder="提示词" onChange={(v:any) => updateRow(row.id, 'prompt', v)} />
+                   <InputField value={row.prompt} placeholder="提示词" onChange={(v:any) => updateRow(row.id, 'prompt', v)} field="prompt" nodeId={id} />
                    <button onClick={()=>setZenMode({type: 'text', rowId: row.id, field: 'prompt', label: '编辑生图提示词'})} className="absolute top-2 right-2 p-1.5 bg-black/80 backdrop-blur-md rounded-lg opacity-0 group-hover/prompt:opacity-100 text-zinc-400 hover:text-white transition-all shadow-md"><Expand size={12}/></button>
                 </div>
 
@@ -3274,6 +3330,7 @@ export const TextNode = ({ id, data, selected }: any) => {
         </div>
         
         <textarea
+          data-node-id={id} data-field="text" data-field-label="文本内容"
           value={data.text || ''}
           onChange={(e) => updateNodeData(id, { text: e.target.value })}
           placeholder="在此输入自定义备注或剧本草稿..."

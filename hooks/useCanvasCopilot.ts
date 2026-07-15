@@ -53,8 +53,8 @@ interface UseCanvasCopilotOptions {
 
 /** 匹配：把所有/所有 [类型] 的 [字段] 改成/改为 [值] */
 function parseBatchUpdateType(input: string): ParsedAction | null {
-  // 1. "把所有分镜的比例改成 16:9"
-  const batchTypeRegex = /(?:把|将)?\s*(?:所有|全部)\s*(分镜|shot|图像|media|视频|render|资产表|assetTable|text|文本)?\s*(?:节点|卡片)?\s*(?:的|地)?\s*(\S+?)\s*(?:改|改成|改为|设置|设定为)\s*[：:]?\s*(.+)/i;
+  // ★ 扩展动词列表 + "所有/全部"改为可选，支持"覆盖""修改"等自然表达
+  const batchTypeRegex = /(?:把|将)?\s*(?:所有|全部|某些|部分|一些)?\s*(分镜|shot|图像|media|视频|render|资产表|assetTable|text|文本)?\s*(?:节点|卡片)?\s*(?:的|地)?\s*(\S+?)\s*(?:改|改成|改为|改成|设置|设定为|覆盖|修改|更改为|设为|换成|统一为)\s*[：:]?\s*(.+)/i;
   const match = input.match(batchTypeRegex);
   if (!match) return null;
 
@@ -80,7 +80,7 @@ function parseBatchUpdateType(input: string): ParsedAction | null {
 
 /** 匹配：在 [字段] 后面/末尾加上/追加 [内容] */
 function parseBatchAppend(input: string): ParsedAction | null {
-  const appendRegex = /(?:在|给)\s*(?:所有|全部)?\s*(分镜|shot|图像|media|视频|render|节点)?\s*(?:的)?\s*(\S+?)\s*(?:后|末尾|结尾|后面)\s*(?:加|加上|追加|添加)\s*[：:]?\s*(.+)/i;
+  const appendRegex = /(?:在|给)\s*(?:所有|全部|某些|部分)?\s*(分镜|shot|图像|media|视频|render|节点)?\s*(?:的)?\s*(\S+?)\s*(?:后|末尾|结尾|后面)\s*(?:加|加上|追加|添加|补充|拼接)\s*[：:]?\s*(.+)/i;
   const match = input.match(appendRegex);
   if (!match) return null;
 
@@ -99,7 +99,7 @@ function parseBatchAppend(input: string): ParsedAction | null {
 
 /** 匹配：把不是 [值] 的改成 [值] */
 function parseBatchUpdateFilter(input: string): ParsedAction | null {
-  const filterRegex = /(?:把|将)?\s*(?:所有|全部)?\s*(?:不是|非)\s*(\S+?)\s*(?:的|地)?\s*(分镜|shot|图像|media|视频|render|节点)?\s*(?:都)?\s*改(?:成|为)\s*[：:]?\s*(.+)/i;
+  const filterRegex = /(?:把|将)?\s*(?:所有|全部)?\s*(?:不是|非)\s*(\S+?)\s*(?:的|地)?\s*(分镜|shot|图像|media|视频|render|节点)?\s*(?:都)?\s*(?:改(?:成|为)|修改为|覆盖|换成|统一为)\s*[：:]?\s*(.+)/i;
   const match = input.match(filterRegex);
   if (!match) return null;
 
@@ -258,7 +258,11 @@ ${nodeLines}
 ═══════════════════════════════════════
 - 用自然中文回复用户
 - 如果用户的请求涉及修改画布，请在你的回复末尾单独一行写：【确认修改】
-- 在【确认修改】之前，简明总结你将要做什么
+- 在【确认修改】之后，紧接着用一句话精确描述你要执行的操作
+  例如：「把所有分镜的提示词改成 新的描述」
+  例如：「把所有分镜的比例改为 16:9」
+  例如：「在每个分镜的提示词末尾加上 cinematic lighting」
+  例如：「把不是 16:9 的分镜都改成 16:9」
 - 不需要输出 JSON，不需要代码块，不需要长篇大论
 - 像朋友聊天一样简短回复`;
   }, [getEdges]);
