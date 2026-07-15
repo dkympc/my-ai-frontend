@@ -896,7 +896,62 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
 
             <div className="w-full h-px bg-white/[0.05]" />
 
-            {/* 2. 后缀智能追加 */}
+            {/* 2. 资产表生图全局前缀（拼在 Prompt 最顶部） */}
+            <div className="flex flex-col gap-3">
+              <label className="text-[10px] font-extrabold text-zinc-500 uppercase tracking-widest pl-1">
+                全局资产表前缀 (Asset Prompt Prefix)
+              </label>
+              <textarea
+                className="w-full bg-black/40 border border-white/5 focus:border-emerald-500/50 hover:bg-white/[0.01] rounded-[16px] p-3 text-[12px] text-zinc-300 outline-none w-full font-mono transition-colors nodrag nopan resize-none custom-scrollbar min-h-[70px] shadow-inner"
+                placeholder="例如：电影质感，胶片颗粒，柔光摄影..."
+                value={canvasSettings?.globalAssetPromptPrefix || ''}
+                onChange={(e) => setCanvasSettings({ ...canvasSettings, globalAssetPromptPrefix: e.target.value })}
+                onWheelCapture={(e) => { if (!e.ctrlKey && !e.metaKey) e.stopPropagation(); }}
+              />
+              <p className="text-[9px] text-zinc-600 pl-1">此内容将拼接到所有资产表生图 Prompt 的最顶部（globalRatio 前缀之前）</p>
+              
+              <button
+                onClick={() => {
+                  const currentPrefix = canvasSettings?.globalAssetPromptPrefix || '';
+                  
+                  setNodes(nds => nds.map(node => {
+                    if (node.type !== 'assetTable' || !node.data.rows) return node;
+                    
+                    const newRows = node.data.rows.map((row: any) => {
+                      let cleanPrompt = row.prompt || '';
+                      const lastApplied = row._lastAppliedPrefix || '';
+                      
+                      // 清洗上一次追加的前缀（防套娃堆叠）
+                      if (lastApplied && lastApplied.trim() && cleanPrompt.startsWith(lastApplied)) {
+                        cleanPrompt = cleanPrompt.slice(lastApplied.length).trim();
+                      }
+                      
+                      // 追加新的全局前缀到 Prompt 最顶部
+                      const newPrompt = currentPrefix.trim() 
+                        ? `${currentPrefix}, ${cleanPrompt}`
+                        : cleanPrompt;
+                      
+                      return { ...row, prompt: newPrompt, _lastAppliedPrefix: currentPrefix || '' };
+                    });
+                    
+                    return { ...node, data: { ...node.data, rows: newRows } };
+                  }));
+                  
+                  if (currentPrefix.trim()) {
+                    useAppStore.getState().setToastMsg(`✨ 全局前缀已穿透覆盖至所有资产表 Prompt 顶部`);
+                  } else {
+                    useAppStore.getState().setToastMsg(`🧹 已安全清除所有资产表的全局提示词前缀`);
+                  }
+                }}
+                className="w-full py-3 rounded-[16px] bg-emerald-500 hover:bg-emerald-400 text-white text-[12px] font-bold tracking-widest transition-all active:scale-[0.98] shadow-[0_10px_25px_rgba(16,185,129,0.3)] flex items-center justify-center gap-2"
+              >
+                <span>⚡ 穿透覆盖至所有资产表</span>
+              </button>
+            </div>
+
+            <div className="w-full h-px bg-white/[0.05]" />
+
+            {/* 3. 后缀智能追加 */}
             <div className="flex flex-col gap-3">
               <label className="text-[10px] font-extrabold text-zinc-500 uppercase tracking-widest pl-1">
                 全局提示词后缀 (Prompt Suffix)

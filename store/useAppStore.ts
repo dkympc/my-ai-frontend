@@ -15,7 +15,7 @@ interface AppState {
   canvasProjects?: any[]; 
   updateCanvasProject?: (id: string, data: any | ((prev: any) => any)) => void; 
     // ✨ 新增画布全局设置
-  canvasSettings: { defaultImageModel: string; defaultVideoModel: string; globalPromptSuffix: string; globalRatio: string; directorGenre: string; directorTempo: string; };
+  canvasSettings: { defaultImageModel: string; defaultVideoModel: string; globalPromptSuffix: string; globalAssetPromptPrefix: string; globalRatio: string; directorGenre: string; directorTempo: string; };
   setCanvasSettings: (updater: any) => void;
   activeView: 'chat' | 'image-gen' | 'video-gen' | 'workflow-gallery' | 'workflow-execution' | 'video-canvas' | 'agent-customer-service';
   activeCanvasProjectId: string | null;
@@ -39,7 +39,7 @@ interface AppState {
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
-      canvasSettings: { defaultImageModel: 'gpt-image-2', defaultVideoModel: 'doubao-seedance-2-0-260128', globalPromptSuffix: '', globalRatio: '16:9', directorGenre: 'default', directorTempo: '' },
+      canvasSettings: { defaultImageModel: 'gpt-image-2', defaultVideoModel: 'doubao-seedance-2-0-260128', globalPromptSuffix: '', globalAssetPromptPrefix: '', globalRatio: '16:9', directorGenre: 'default', directorTempo: '' },
       setCanvasSettings: (updater) => set((state) => ({
         canvasSettings: typeof updater === 'function' ? updater(state.canvasSettings) : updater
       })),
