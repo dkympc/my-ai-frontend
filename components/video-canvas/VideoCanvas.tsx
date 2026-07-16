@@ -92,7 +92,7 @@ function ZoomPanel() {
 }
 
 function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
-  const { activeCanvasProjectId, setActiveCanvasProjectId, canvasProjects, updateCanvasProject, canvasSettings, setCanvasSettings, isFilmControlOpen, setIsFilmControlOpen, copilotIsOpen, setCopilotIsOpen } = useAppStore();
+  const { activeCanvasProjectId, setActiveCanvasProjectId, canvasProjects, updateCanvasProject, canvasSettings, setCanvasSettings, isFilmControlOpen, setIsFilmControlOpen, copilotIsOpen, setCopilotIsOpen, selectionAssistEnabled, setSelectionAssistEnabled } = useAppStore();
   const currentProject = (canvasProjects || []).find((p: any) => p.id === activeCanvasProjectId);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(currentProject?.nodes || []);
@@ -1063,8 +1063,8 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
         copilot={copilot} 
       />
 
-      {/* ★★★ 全局文字选中 AI 助手 — 所有 textarea/input 选中文字后弹出 ★★★ */}
-      <SelectionAssist />
+      {/* ★★★ 全局文字选中 AI 助手 — 仅当用户在设置中开启时渲染 ★★★ */}
+      {selectionAssistEnabled && <SelectionAssist />}
       {ripples.map(r => (
         <div
           key={r.id}
@@ -1257,6 +1257,25 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
                            {m.label}
                         </button>
                       ))}
+                    </div>
+                 </div>
+
+                 <div className="w-full h-px bg-white/[0.05] my-2" />
+
+                 {/* ★ 画布功能开关 */}
+                 <div>
+                    <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-3 pl-1">画布功能</label>
+                    <div className="flex items-center justify-between p-3 bg-black/40 border border-white/[0.08] rounded-[16px]">
+                      <div>
+                        <span className="text-[12px] text-zinc-300 font-medium">全局助手</span>
+                        <p className="text-[10px] text-zinc-600 mt-0.5">选中画布文字时弹出 AI 辅助工具条</p>
+                      </div>
+                      <button
+                        onClick={() => setSelectionAssistEnabled(!selectionAssistEnabled)}
+                        className={`w-10 h-6 rounded-full relative transition-colors duration-300 flex-shrink-0 ${selectionAssistEnabled ? 'bg-white' : 'bg-white/10'}`}
+                      >
+                        <div className={`absolute top-[2px] left-[2px] w-5 h-5 rounded-full transition-transform duration-300 shadow-sm ${selectionAssistEnabled ? 'translate-x-4 bg-black' : 'translate-x-0 bg-zinc-500'}`} />
+                      </button>
                     </div>
                  </div>
 

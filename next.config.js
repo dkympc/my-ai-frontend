@@ -6,7 +6,6 @@ const FASTAPI_BASE_URL = process.env.NODE_ENV === 'development'
   : 'http://49.232.57.73:8000';
 
 const nextConfig = {
-  output: 'standalone',
   poweredByHeader: false, 
   reactStrictMode: true,
   eslint: { ignoreDuringBuilds: true },

@@ -86,43 +86,31 @@ export default function CopilotPanel({ isOpen, onClose, copilot }: CopilotPanelP
   // 自动滚底
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
-  // ★ 发送消息 + 智能意图处理
+  // ★ 发送消息 → LLM 回复 → 解析 !command → 确认弹窗 → 执行
   const handleSend = async () => {
     const text = input.trim();
     if (!text || isProcessing) return;
     setInput('');
 
-    // 1. 先做本地意图解析
-    const localIntent = parseUserIntent(text);
-
-    // 2. 发送给 LLM（流式）
+    // 发送给 LLM（流式），所有操作判断交给 LLM
     const result = await sendMessage(text);
 
-    // 3. 如果本地解析到了意图，直接展示确认弹窗
-    if (localIntent) {
+    // LLM 回复中有【确认修改】标记 → 解析 !command 指令并展示确认弹窗
+    if (result.intentConfirmed) {
+      const reIntent = parseUserIntent(result.message) || parseUserIntent(text);
+      const cmdCount = reIntent?.commands?.length || 1;
+      const confirmDesc = reIntent
+        ? (cmdCount > 1 ? `${cmdCount} 项操作：${reIntent.description}` : reIntent.description)
+        : '根据 AI 的分析执行画布操作';
       const confirmed = await showConfirm(
         '创作助手',
-        `${localIntent.description}\n\n是否执行此修改？`,
+        `${result.message.slice(0, 250)}${result.message.length > 250 ? '...' : ''}\n\n──\n${confirmDesc}\n\n是否执行？`,
         'info'
       );
       if (confirmed) {
-        const count = executeLocalIntent(localIntent);
-        setToastMsg(`✅ 创作助手已完成 ${count} 处修改`);
-      }
-    }
-    // 4. 如果 LLM 回复中有【确认修改】标记，展示确认弹窗
-    else if (result.intentConfirmed) {
-      const confirmed = await showConfirm(
-        '创作助手',
-        `${result.message}\n\n根据 AI 的分析，是否执行此修改？`,
-        'info'
-      );
-      if (confirmed) {
-        // ★ 核心修复：优先解析 LLM 的回复文本（AI理解后可产生更准确匹配），回退到原始用户输入
-        const reIntent = parseUserIntent(result.message) || parseUserIntent(text);
         if (reIntent) {
           const count = executeLocalIntent(reIntent);
-          setToastMsg(`✅ 创作助手已完成 ${count} 处修改`);
+          setToastMsg(`创作助手已完成 ${count} 处操作`);
         } else {
           setToastMsg('创作助手已确认，但无法自动解析具体操作。请换一种方式描述。');
         }
