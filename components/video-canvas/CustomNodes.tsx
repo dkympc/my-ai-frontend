@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { fetchApi } from '@/services/api';
 import { DirectorRouter } from '@/lib/director-rules';
+import EpisodeSelectModal from './EpisodeSelectModal';
 
 // ✨ 放在 CustomNodes.tsx 文件顶部 imports 区域下方
 const compressImage = (file: File, maxWidth = 1024): Promise<string> => {
@@ -301,7 +302,45 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
   const [showBookmarks, setShowBookmarks] = useState(false);
   const [extractingAsset, setExtractingAsset] = useState<string | null>(null); // ✨ 新增：控制资产表格提取状态
   const [showAssetMenu, setShowAssetMenu] = useState(false); // ✨ 新增：控制提取菜单
+  const [showEpisodeSelect, setShowEpisodeSelect] = useState(false); // ★ 集数选择弹窗开关
+  const [episodeSelectMode, setEpisodeSelectMode] = useState<'asset' | 'fission'>('asset'); // ★ 弹窗模式：资产提取 or 分镜选区
+  const [episodeSelectAssetType, setEpisodeSelectAssetType] = useState<'scene' | 'character' | 'prop'>('scene'); // ★ 资产表提取类型
+  const [cachedEpisodesForModal, setCachedEpisodesForModal] = useState<any[] | null>(null); // ★ 缓存命中时传给弹窗
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // ★ 集数检测结果缓存（避免每次打开弹窗都调 LLM）
+  // 缓存键 = 剧本哈希（长度+首尾取样），剧本变更时自动失效
+  const episodeCacheRef = useRef<{ episodes: any[]; scriptHash: string } | null>(null);
+
+  // ★ 剧本内容指纹（快速判断剧本是否变更，不做完整哈希——长度+首100字+尾100字）
+  const getScriptHash = (text: string): string => {
+    const len = text.length;
+    const head = text.substring(0, 100).replace(/\s/g, '');
+    const tail = text.substring(Math.max(0, len - 100)).replace(/\s/g, '');
+    return `${len}_${head}_${tail}`;
+  };
+
+  // ★ 统一的弹窗打开入口：先检查缓存 → 命中则跳过 LLM 检测
+  // 返回 cached episodes 或 null（缓存未命中），供 EpisodeSelectModal 的 preloadedEpisodes prop 使用
+  const getOrOpenEpisodeSelect = (mode: 'asset' | 'fission', assetType?: 'scene' | 'character' | 'prop') => {
+    const scriptText = data.text || '';
+    if (!scriptText) return null;
+    const hash = getScriptHash(scriptText);
+    const cached = episodeCacheRef.current;
+
+    setEpisodeSelectMode(mode);
+    if (assetType) setEpisodeSelectAssetType(assetType);
+    setShowEpisodeSelect(true);
+
+    // 缓存命中且未过期 → 存到 state，供 JSX 中 preloadedEpisodes 使用
+    if (cached && cached.scriptHash === hash && cached.episodes.length > 0) {
+      setCachedEpisodesForModal(cached.episodes);
+      return cached.episodes;
+    }
+
+    setCachedEpisodesForModal(null);
+    return null; // 缓存未命中 → 弹窗内部走完整检测流程
+  };
 
   // 引入队列引擎
   const { enqueueTask } = useCanvasEngine();
@@ -334,6 +373,7 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
 
       const payload = {
         model: targetModel,
+        max_tokens: 4096, // ★ 摄影机参数输出只有一句话，4096 足够
         messages: [
           {
             role: "system",
@@ -359,7 +399,7 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
 正确示范（纯二次元）：Studio Ghibli animation, soft watercolor pastel palette, Cel shading, cinematic low-contrast light
 正确示范（纯实拍）：Shot on ARRI Alexa 65, Vintage Cooke Anamorphic lenses, Bleach Bypass LUT, Hard-contrast cinematic lighting`
           },
-          { role: "user", content: `剧本内容：\n${data.text.substring(0, 8000)}` }
+          { role: "user", content: `剧本内容：\n${data.text}` }
         ]
       };
 
@@ -380,33 +420,69 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
     }
   };
 
-  // ✨ 全新：盘点并直接裂变出【资产表格节点】(强制中文+自动硬拼接)
-  const handleExtractAssetTable = async (type: 'scene' | 'character' | 'prop') => {
+  // ==========================================
+  // ★★★ 资产表提取：二阶段流程（集数检测 → 用户选择 → 提取）
+  // ==========================================
+
+  // 阶段①：打开集数选择弹窗（替代原来的直接提取）
+  const handleExtractAssetTable = (type: 'scene' | 'character' | 'prop') => {
     if (!data.text) return useAppStore.getState().setToastMsg("请先在上方输入剧本！");
     setExtractingAsset(type);
     setShowAssetMenu(false);
-    useAppStore.getState().setToastMsg(`正在通读剧本，提炼${type === 'scene' ? '场景' : type === 'character' ? '角色' : '道具'}数据表...`);
-    
+    getOrOpenEpisodeSelect('asset', type);
+    // ★ 弹窗检测完成后，在 handleEpisodeConfirm 中执行实际提取
+  };
+
+  // ★ 集数检测完成回调：缓存结果到 ref，下次打开弹窗跳过 LLM 调用
+  const handleEpisodesDetected = (episodes: any[]) => {
+    const hash = getScriptHash(data.text || '');
+    episodeCacheRef.current = { episodes, scriptHash: hash };
+    // ★ 同时清空状态中的缓存标记（弹窗已用 preloaded 走完首次显示，后续从 ref 读）
+    setCachedEpisodesForModal(null);
+  };
+
+  // ★ 集数选择弹窗确认回调（统一入口：分镜选区 or 资产提取）
+  const handleEpisodeConfirm = async (result: { episodes: any[], text: string }) => {
+    setShowEpisodeSelect(false);
+
+    if (episodeSelectMode === 'fission') {
+      // 分镜「按集选择」→ 填充 selectedText，用户再手动点击「裂变分镜」
+      setSelectedText(result.text);
+      setSelectionRange({ start: 0, end: result.text.length });
+      useAppStore.getState().setToastMsg(`✅ 已选中 ${result.episodes.length} 集（约${result.text.length}字），请点击「裂变分镜」开始裂变`);
+      return;
+    }
+
+    // 资产表提取模式 → 执行实际提取
+    const type = episodeSelectAssetType;
+    await executeAssetExtraction(type, result);
+  };
+
+  // 阶段②：实际资产提取逻辑（由 handleEpisodeConfirm 调用，完整保留原有提取+建节点流程）
+  const executeAssetExtraction = async (type: 'scene' | 'character' | 'prop', episodeResult: { episodes: any[], text: string }) => {
+    const typeLabel = type === 'scene' ? '场景' : type === 'character' ? '角色' : '道具';
+    useAppStore.getState().setToastMsg(`正在提取选中段落的${typeLabel}数据...`);
+
     try {
       const targetModel = data.model || 'deepseek-v4-pro';
-      
-      // ✨ 核心修复：提取全局导演上下文，让提取资产表格时拥有导演审美意志
+
+      // ✨ 提取全局导演上下文
       const canvasSettings = useAppStore.getState().canvasSettings;
       const directorCtx = canvasSettings?.directorGenre && canvasSettings.directorGenre !== 'default'
         ? DirectorRouter.resolve(canvasSettings.directorGenre, canvasSettings.directorTempo || undefined)
         : null;
-      
-      // 组装注入块，如果存在导演规则，则强行附加在 systemPrompt 尾部
-      const directorInjection = directorCtx 
-        ? `\n\n【导演全局视觉约束，提取资产时必须遵循此光影与色彩基调】：\n${directorCtx.llmContextBlock}` 
+
+      const directorInjection = directorCtx
+        ? `\n\n【导演全局视觉约束，提取资产时必须遵循此光影与色彩基调】：\n${directorCtx.llmContextBlock}`
         : "";
 
       let systemPrompt = "";
-      
+
       if (type === 'scene') {
-        systemPrompt = `你是一个顶尖的电影美术指导。通读剧本，提取所有核心场景，场景要符合剧本元素特征，输出正确的空间描述，全部提取为正面全景。
+        systemPrompt = `你是一个顶尖的电影美术指导。通读剧本，提取选定段落中所有核心场景，场景要符合剧本元素特征，输出正确的空间描述，全部提取为正面全景。
 如剧本中未标明剧本背景（如西方，统一设定为东方风格设定）
 【绝对红线】：场景提示词(prompt)中绝对不允许出现任何人物角色！这只是一张空镜头环境概念设定图！场景中不可以出现元素之间的冲突违和，比如现代办公室不允许出现与时代或者环境不符的元素，例如清冷科技感的办公室出现粗糙的木制办公桌（除非剧本元素中包含），禁止使用夸张的色调，尽量以柔光为主，三点布光原则。
+【完整性要求】：必须提取选定段落中【全部】场景，不得遗漏任何场景！
 要求返回 JSON 数组格式，字段严格为：
 [{"id": "s1", "name": "场景名", "time": "白天/夜晚/傍晚等", "lighting": "极简纯英文光影描述(如: diffuse light, low contrast)", "stage": "该场景在剧本哪几个阶段出现", "prompt": "纯中文场景环境描述。请参考此结构：
 示例：
@@ -416,32 +492,39 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
  环境：遍地是杂乱无章的低矮坟包和断裂、歪斜的残碑。枯死的黑色树枝像鬼爪般伸向天空...等环境里的元素。
 特殊细节：空气中弥漫着极淡的、似有似无的灰绿色雾气。绝对不要写摄影机参数，绝对不要写任何人物！"}]`;
       } else if (type === 'character') {
-        systemPrompt = `你是一个顶尖的电影造型指导。通读剧本，提取所有出场人物。
+        systemPrompt = `你是一个顶尖的电影造型指导。通读剧本，提取选定段落中所有出场人物。
 【绝对红线】：这是角色设定图/静态立绘，绝对不要描写人物的具体剧情动作或场景交互！若同一人物在不同时期着装不同，必须分为两个独立人物行。
 【人物面容与种族自动识别约束】：请根据剧本的世界观和故事区域，自动识别并生成符合逻辑的人物种族面貌描述。若剧本背景为中国本土、东方文化地域、或未明确标明任何地域/种族特征，一概默认所有出场人物均为【中国华人】面容，保留亚洲人的五官骨架、肤色和毛发特征。若剧本明确标注为西方、异世界、奇幻、科幻等非中国背景地域，则严格按照剧本本身的暗示生成对应种族面孔。在你的 prompt 字段中，必须在最前面明确描述这个人物的具体人种与五官特征。
+【完整性要求】：必须提取选定段落中【全部】出场人物，不得遗漏任何角色！
 要求返回 JSON 数组格式，字段严格为：
 [{"id": "c1", "name": "人物名称", "age": "年龄", "clothing": "极简中文着装描述", "traits": "人物性格与特质", "stage": "出场阶段", "prompt": "纯中文角色设定描述。只需详细描写：性别、年龄、长相、外貌特征、体态、穿着款式材质、特殊细节(如伤疤/配饰)。保持静态站立姿态，绝对不要写动作、光影或画质参数！"}]`;
       } else if (type === 'prop') {
-        systemPrompt = `你是一个顶尖的电影道具师。通读剧本，提取核心道具。
+        systemPrompt = `你是一个顶尖的电影道具师。通读剧本，提取选定段落中所有核心道具。
+【完整性要求】：必须提取选定段落中【全部】核心道具，不得遗漏任何内容！
 要求返回 JSON 数组格式，字段严格为：
 [{"id": "p1", "name": "道具名", "stage": "出现节点", "prompt": "纯中文道具细节描述(详细描述材质、颜色、磨损程度和外观细节，保持静态单独展示)"}]`;
       }
 
-      // 将 systemPrompt 与 directorInjection 拼接发送
-      const payload = { 
-        model: targetModel, 
+      // ★ 构建集数过滤指令（告诉 LLM 只提取选中段落，不设 max_tokens 上限，不截断剧本）
+      const episodeFilter = episodeResult.episodes && episodeResult.episodes.length > 0
+        ? `\n\n【提取范围约束】：请只提取以下段落的${typeLabel}：${episodeResult.episodes.map((e: any) => e.label).join('、')}。共${episodeResult.episodes.length}个段落，每个段落都必须完整覆盖，不得遗漏任何段落的${typeLabel}。`
+        : '';
+
+      // ★ 构建 payload：不设 max_tokens（让 LLM 自由输出完整 JSON），不截断剧本（发送完整 data.text）
+      const payload = {
+        model: targetModel,
         messages: [
-          { role: "system", content: systemPrompt + directorInjection }, 
-          { role: "user", content: `剧本内容：\n${data.text.substring(0, 15000)}` }
-        ] 
+          { role: "system", content: systemPrompt + directorInjection },
+          { role: "user", content: `剧本内容：\n${data.text}${episodeFilter}` }
+        ]
       };
-      
-      // ★ 改为流式请求：资产表提取实时展示进度
+
+      // ★ 流式请求：资产表提取实时展示进度
       const rawContent = await fetchStreamingChat(payload, (text) => {
         const preview = text.length > 60 ? '...' + text.slice(-60) : text;
-        useAppStore.getState().setToastMsg(`📋 资产数据提取中... ${preview}`);
+        useAppStore.getState().setToastMsg(`📋 ${typeLabel}数据提取中... ${preview}`);
       });
-      
+
       let cleanJson = rawContent;
       const match = rawContent.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
       if (match) cleanJson = match[1];
@@ -449,43 +532,85 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
 
       // ✨ 核心魔法：在表格生成瞬间，立刻把 LLM 的中文 prompt 加上光影和全局摄影机！
       const finalRows = parsedRows.map((row: any) => {
-         let assembledPrompt = row.prompt || '';
-         const lightStr = row.lighting ? `, ${row.lighting}` : '';
-         const cameraStr = data.globalCamera ? `, ${data.globalCamera}` : '';
-         assembledPrompt = `${assembledPrompt}${lightStr}${cameraStr}`;
-         return { ...row, prompt: assembledPrompt };
+        let assembledPrompt = row.prompt || '';
+        const lightStr = row.lighting ? `, ${row.lighting}` : '';
+        const cameraStr = data.globalCamera ? `, ${data.globalCamera}` : '';
+        assembledPrompt = `${assembledPrompt}${lightStr}${cameraStr}`;
+        return { ...row, prompt: assembledPrompt };
       });
 
       const thisNode = getNodes().find(n => n.id === id);
       const baseX = thisNode ? thisNode.position.x : 0;
       const baseY = thisNode ? thisNode.position.y : 0;
       const existingTablesCount = getNodes().filter(n => n.type === 'assetTable').length;
-      
+
       const newNodeId = `asset_table_${type}_${Date.now()}`;
       // ★ 继承全局比例设置，确保资产表默认比例与中控台一致
       const inheritedRatio = useAppStore.getState().canvasSettings.globalRatio || '16:9';
       const newTableNode = {
         id: newNodeId, type: 'assetTable',
         position: { x: baseX + 650, y: baseY - 100 + (existingTablesCount * 450) },
-        data: { assetType: type, rows: finalRows, ratio: inheritedRatio } // 继承全局比例 + 组装好的 finalRows
+        data: { assetType: type, rows: finalRows, ratio: inheritedRatio }
       };
 
-      const newEdge = { 
-        id: `e-${id}-${newNodeId}`, source: id, target: newNodeId, sourceHandle: 'right', targetHandle: 'left', 
-        type: 'default', animated: true, style: { stroke: 'rgba(217, 70, 239, 0.8)', strokeWidth: 2, strokeDasharray: '8 8', animationDuration: '3s' } 
+      const newEdge = {
+        id: `e-${id}-${newNodeId}`, source: id, target: newNodeId, sourceHandle: 'right', targetHandle: 'left',
+        type: 'default', animated: true, style: { stroke: 'rgba(217, 70, 239, 0.8)', strokeWidth: 2, strokeDasharray: '8 8', animationDuration: '3s' }
       };
 
       setNodes((nds) => [...nds, newTableNode]);
       setEdges((eds) => [...eds, newEdge]);
-      useAppStore.getState().setToastMsg(`✅ ${type === 'scene' ? '场景' : type === 'character' ? '角色' : '道具'}数据表生成成功！`);
+      useAppStore.getState().setToastMsg(`✅ ${typeLabel}数据表生成成功！共${finalRows.length}条`);
 
     } catch (error: any) {
+      console.error("[Asset Extract Error]", error);
       useAppStore.getState().setToastMsg(`数据表生成失败: ${error.message}`);
     } finally {
       setExtractingAsset(null);
     }
   };
 
+
+  // ★★★ 构建已有分镜摘要（注入分镜裂变上下文，让 LLM 了解画布上前后的空间/时序状态）
+  // 只取前后各 10 个分镜，防止上下文过长
+  const buildExistingShotsSummary = (shots: any[]) => {
+    if (shots.length === 0) return "暂无已拆解分镜。";
+
+    // 按 shotNumber 排序（解析数字部分）
+    const sorted = [...shots].sort((a, b) => {
+      const numA = parseInt(String(a.data.shotNumber || '0').match(/\d+/)?.[0] || '0');
+      const numB = parseInt(String(b.data.shotNumber || '0').match(/\d+/)?.[0] || '0');
+      return numA - numB;
+    });
+
+    const MAX_SHOTS = 20; // 最多注入 20 个分镜摘要
+    let selected: typeof sorted;
+
+    if (sorted.length <= MAX_SHOTS) {
+      selected = sorted;
+    } else {
+      // 取前10个 + 后10个
+      selected = [...sorted.slice(0, 10), ...sorted.slice(-10)];
+    }
+
+    const lines = selected.map((n) => {
+      const d = n.data;
+      const num = d.shotNumber || '?';
+      const scene = (d.scriptText || '').replace(/\n/g, ' ').substring(0, 40);
+      const chars = (d.videoPrompt || '').match(/@\S+/g)?.join(', ') || '无标注';
+      const duration = d.duration || '?';
+      const cameraPreview = (d.videoPrompt || '').match(/机位规则[：:]\s*(.+?)(?:\n|$)/)?.[1]
+        || (d.videoPrompt || '').match(/cameraRules["\']?\s*:\s*["\']?\s*(.+?)(?:["\']|\n|$)/)?.[1]
+        || '未设定';
+      return `💍 ${num} (${scene}): ${chars} | 时长${duration}s | ${cameraPreview.substring(0, 60)}`;
+    });
+
+    if (shots.length > MAX_SHOTS) {
+      lines.splice(10, 0, `...（中间省略 ${shots.length - MAX_SHOTS} 个分镜）`);
+    }
+
+    return lines.join('\n');
+  };
 
 
   const handleFissionShots = async () => {
@@ -517,6 +642,9 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
                if (num > maxShotNum) maxShotNum = num;
             });
             const nextShotStart = maxShotNum + 1;
+
+            // ★ 构建已有分镜上下文摘要（前后各10个，注入裂变 LLM 以延续空间/时序逻辑）
+            const existingShotsSummary = buildExistingShotsSummary(existingShots);
 
       // 导演路由引擎：裂变前解析题材与节奏参数
       const canvasSettings = useAppStore.getState().canvasSettings;
@@ -628,7 +756,7 @@ ${directorCtx?.llmContextBlock || ''}`
           },
           { 
             role: "user", 
-            content: `${dictText}\n\n【照抄用的英文全局摄影参数】：\n${data.globalCamera}\n\n【需拆解的分镜剧本选段】：\n${selectedText}`
+            content: `【完整剧本上下文（仅供理解故事脉络，不参与本次拆解）】：\n${data.text}\n\n【已拆解分镜摘要（供延续空间站位与时序逻辑）】：\n${existingShotsSummary}\n\n${dictText}\n\n【照抄用的英文全局摄影参数】：\n${data.globalCamera}\n\n【★ 本次需拆解的分镜剧本选段】：\n${selectedText}`
           }
         ]
       };
@@ -919,6 +1047,7 @@ ${directorCtx?.llmContextBlock || ''}`
   };
 
   return (
+    <>
     <div className="relative group/node z-30 flex flex-col" style={{ width: '100%', height: '100%', minWidth: '480px', minHeight: '420px' }}>
       <NodeResizeControl minWidth={480} minHeight={420} position="bottom-right" style={{ background: 'transparent', border: 'none', width: '20px', height: '20px', right: '12px', bottom: '12px' }}>
          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-zinc-600 hover:text-white cursor-se-resize opacity-0 group-hover/node:opacity-100 transition-opacity drop-shadow-[0_0_5px_rgba(255,255,255,0.5)]">
@@ -1053,6 +1182,15 @@ ${directorCtx?.llmContextBlock || ''}`
             <CustomSelect menuPosition="left" className="w-[170px] bg-transparent" value={data.model || 'deepseek-v4-pro'} options={[{ value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' }, { value: 'gpt-5.4', label: 'GPT-5.4 (智能)' }, { value: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro' }, { value: 'gemini-3.5-flash', label: 'Gemini 3.5' }]} onChange={(v: string) => updateNodeData(id, { model: v })} />
             <div className="w-px h-5 bg-white/10 mx-1"></div>
             
+            {/* ★ 新增：按集选择入口（不覆盖原有手动划选功能） */}
+            <button
+              onClick={() => { getOrOpenEpisodeSelect('fission'); }}
+              disabled={data.isGenerating}
+              className="flex items-center gap-1.5 px-3 py-2 text-[12px] font-medium text-indigo-400/80 bg-indigo-500/10 border border-indigo-500/20 hover:bg-indigo-500/20 hover:text-indigo-300 rounded-[12px] transition-all nodrag whitespace-nowrap"
+            >
+              📋 按集选择
+            </button>
+
             <button onClick={handleFissionShots} disabled={data.isGenerating} className="flex items-center gap-1.5 px-6 py-2 text-[12px] font-bold text-white bg-indigo-500 hover:bg-indigo-400 rounded-[12px] transition-all shadow-[0_0_20px_rgba(99,102,241,0.5)] nodrag whitespace-nowrap">
               {data.isGenerating ? <Loader2 size={14} className="animate-spin" /> : <Layers size={14} />} 裂变分镜 ({selectedText.length}字)
             </button>
@@ -1063,6 +1201,20 @@ ${directorCtx?.llmContextBlock || ''}`
         )}
       </div>
     </div>
+
+    {/* ★ 集数选择弹窗（资产提取 / 分镜按集选择 共用） */}
+    {showEpisodeSelect && (
+      <EpisodeSelectModal
+        scriptText={data.text || ''}
+        title={episodeSelectMode === 'fission' ? '选择裂变范围' : `选择${episodeSelectAssetType === 'scene' ? '场景' : episodeSelectAssetType === 'character' ? '角色' : '道具'}提取范围`}
+        confirmLabel={episodeSelectMode === 'fission' ? '确认选择' : '确认提取'}
+        preloadedEpisodes={cachedEpisodesForModal || undefined}
+        onEpisodesDetected={handleEpisodesDetected}
+        onConfirm={handleEpisodeConfirm}
+        onCancel={() => { setShowEpisodeSelect(false); setCachedEpisodesForModal(null); }}
+      />
+    )}
+  </>
   );
 };
 // ==========================================
