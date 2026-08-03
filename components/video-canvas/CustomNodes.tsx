@@ -10,6 +10,16 @@ import { fetchApi } from '@/services/api';
 import { DirectorRouter } from '@/lib/director-rules';
 import EpisodeSelectModal from './EpisodeSelectModal';
 
+// ★ 画布 LLM 模型白名单（与 constants.tsx MODELS 同步，用于过滤掉生图/生视频模型）
+const LLM_MODEL_IDS = ['deepseek-v4-pro', 'gpt-5.4', 'gemini-3.1-pro-preview', 'gemini-3.5-flash'];
+
+// ★ 统一 LLM 模型解析：① 节点自选模型（仅当是有效 LLM 模型时）→ ② 中控台全局默认 → ③ 硬兜底
+const resolveLLMModel = (data: any): string => {
+  // ★ 节点 data.model 可能是生图或生视频模型（历史遗留），必须做白名单校验
+  if (data.model && LLM_MODEL_IDS.includes(data.model)) return data.model;
+  return useAppStore.getState().canvasSettings?.defaultLLMModel || 'deepseek-v4-pro';
+};
+
 // ✨ 放在 CustomNodes.tsx 文件顶部 imports 区域下方
 const compressImage = (file: File, maxWidth = 1024): Promise<string> => {
   return new Promise((resolve) => {
@@ -57,12 +67,11 @@ const forceDownload = async (url: string, filename: string) => {
 
 // ★★★ SSE 流式聊天辅助函数 — 解决 stream:false 导致完整缓冲等待、用户感觉"卡死"的问题
 // 原理：用 SSE 逐 chunk 读取，同时通过 onChunk 回调实时展示生成进度
+// 改动：统一走 fetchApi，享受 401/402/403 全局拦截 + API_BASE 前缀 + 统一 Auth
 const fetchStreamingChat = async (payload: any, onChunk?: (text: string) => void): Promise<string> => {
-  const token = localStorage.getItem('yr-ai-token');
-  const response = await fetch('/v1/chat/completions', {
+  const response = await fetchApi('/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-    body: JSON.stringify({ ...payload, stream: true }),
+    body: JSON.stringify({ ...payload, _source: 'canvas', stream: true }),
   });
   if (!response.ok) {
     const errText = await response.text().catch(() => '');
@@ -366,7 +375,7 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
     useAppStore.getState().setToastMsg("正在通读全剧本，锁定电影级全局机位...");
     
     try {
-      const targetModel = data.model || 'deepseek-v4-pro';
+      const targetModel = resolveLLMModel(data);
       
       // ✨ 痛点 1 修复：获取当前画布全局画风设置
       const globalStyle = useAppStore.getState().canvasSettings?.globalPromptSuffix || "无特定风格";
@@ -464,7 +473,7 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
     useAppStore.getState().setToastMsg(`正在提取选中段落的${typeLabel}数据...`);
 
     try {
-      const targetModel = data.model || 'deepseek-v4-pro';
+      const targetModel = resolveLLMModel(data);
 
       // ✨ 提取全局导演上下文
       const canvasSettings = useAppStore.getState().canvasSettings;
@@ -618,7 +627,7 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
     updateNodeData(id, { isGenerating: true });
     
     try {
-      const targetModel = data.model || 'deepseek-v4-pro';
+      const targetModel = resolveLLMModel(data);
             // ✨ [新增] 抓取画布上的资产基建表，构建 LLM 随身字典
             const assetTables = getNodes().filter(n => n.type === 'assetTable');
             let dictText = "【以下是全局基建资产字典，通读剧本时请务必自行比对人物和场景，提取对应的特征和光影(光影必须用纯英文输出)】\n";
@@ -1169,18 +1178,15 @@ ${directorCtx?.llmContextBlock || ''}`
 
       {/* 下方的场记板拦截舱 (直接无脑裂变版) */}
       <div className={`absolute bottom-[-20px] left-1/2 -translate-x-1/2 translate-y-full flex flex-col bg-[#0a0a0c]/95 backdrop-blur-3xl border border-white/[0.1] rounded-[24px] shadow-[0_40px_100px_rgba(0,0,0,0.95)] transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] z-[100] ${(!data.globalCamera || selectedText ? 'w-auto p-1.5 flex-row items-center gap-2 scale-100 opacity-100' : 'scale-90 opacity-0 pointer-events-none')}`}>
-        {!data.globalCamera ? (
+         {!data.globalCamera ? (
           <>
-            <CustomSelect menuPosition="left" className="w-[170px] bg-transparent" value={data.model || 'deepseek-v4-pro'} options={[{ value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' }, { value: 'gpt-5.4', label: 'GPT-5.4 (智能)' }, { value: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro' }, { value: 'gemini-3.5-flash', label: 'Gemini 3.5' }]} onChange={(v: string) => updateNodeData(id, { model: v })} />
-            <div className="w-px h-5 bg-white/10 mx-1"></div>
             <button onClick={handleExtractCamera} disabled={data.isExtractingCamera} className="flex items-center justify-center gap-2 px-5 py-2 bg-indigo-500 text-white hover:bg-indigo-400 rounded-[12px] text-[12px] font-bold transition-all shadow-[0_0_20px_rgba(99,102,241,0.4)] whitespace-nowrap nodrag">
                {data.isExtractingCamera ? <Loader2 size={14} className="animate-spin" /> : <Settings2 size={14} />} 锚定全片摄影机
             </button>
           </>
         ) : (
           <>
-            <CustomSelect menuPosition="left" className="w-[170px] bg-transparent" value={data.model || 'deepseek-v4-pro'} options={[{ value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' }, { value: 'gpt-5.4', label: 'GPT-5.4 (智能)' }, { value: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro' }, { value: 'gemini-3.5-flash', label: 'Gemini 3.5' }]} onChange={(v: string) => updateNodeData(id, { model: v })} />
-            <div className="w-px h-5 bg-white/10 mx-1"></div>
+            {/* ★ LLM 模型选择已移至左侧中控台统一管理，确保在任何步骤下都能切换模型 */}
             
             {/* ★ 新增：按集选择入口（不覆盖原有手动划选功能） */}
             <button

@@ -27,6 +27,7 @@ import '@xyflow/react/dist/style.css';
 import { ArrowLeft, Plus, Type, Image as ImageIconIcon, Film, ZoomIn, ZoomOut, Maximize, Clapperboard, Layers, Check, Settings, X, Loader2, RotateCcw, Sliders, ChevronDown, MessageSquare } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { GENRE_PRESETS, TEMPO_PROFILES } from '@/lib/director-rules';
+import { MODELS } from '@/lib/constants';
 import AssetDock from './AssetDock'; 
 import { ImageRecord, VideoRecord } from '@/lib/types'; 
 import { fetchApi } from '@/services/api';
@@ -845,6 +846,28 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
           </div>
 
           <div className="flex-1 p-6 overflow-y-auto custom-scrollbar flex flex-col gap-6">
+            {/* 0. LLM 模型选择器 — 画布所有文本调用（摄影机锚定、裂变分镜、资产表提取、创作助手等）统一使用此模型 */}
+            <div className="flex flex-col gap-3">
+              <label className="text-[10px] font-extrabold text-zinc-500 uppercase tracking-widest pl-1">
+                LLM 模型 (Canvas Chat Model)
+              </label>
+              <select
+                className="w-full bg-black/40 border border-white/5 focus:border-indigo-500/50 hover:bg-white/[0.01] rounded-[16px] p-3 text-[13px] text-zinc-300 outline-none cursor-pointer transition-all nodrag"
+                value={canvasSettings?.defaultLLMModel || 'deepseek-v4-pro'}
+                onChange={(e) => setCanvasSettings({ ...canvasSettings, defaultLLMModel: e.target.value })}
+              >
+                {MODELS.map(m => (
+                  <option key={m.id} value={m.id} className="bg-[#121212] text-zinc-200">{m.name}</option>
+                ))}
+              </select>
+              <p className="text-[9px] text-zinc-600 pl-1 leading-relaxed">
+                画布中所有 AI 文本调用（摄影机锚定、裂变分镜、资产表提取、创作助手等）统一使用此模型。
+                {canvasSettings?.defaultLLMModel ? ` 当前：${MODELS.find(m => m.id === canvasSettings.defaultLLMModel)?.name || canvasSettings.defaultLLMModel}` : ' 使用默认模型'}
+              </p>
+            </div>
+
+            <div className="w-full h-px bg-white/[0.05]" />
+
             {/* 0. 导演引擎：题材 + 节奏选择 */}
             <div className="flex flex-col gap-3">
               <label className="text-[10px] font-extrabold text-zinc-500 uppercase tracking-widest pl-1">

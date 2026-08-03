@@ -3,6 +3,8 @@
 import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Loader2, X, Square, CheckSquare } from "lucide-react";
+import { fetchApi } from "@/services/api";
+import { useAppStore } from "@/store/useAppStore";
 
 // ==========================================
 // EpisodeSelectModal — 集数检测 + 选择 UI 二合一弹窗
@@ -86,14 +88,12 @@ export default function EpisodeSelectModal({
         const token = localStorage.getItem("yr-ai-token");
         if (!token) throw new Error("[Episode Detect Error] 未登录，请先登录");
 
-        const response = await fetch("/v1/chat/completions", {
+        const detectModel = useAppStore.getState().canvasSettings?.defaultLLMModel || "deepseek-v4-pro";
+
+        const response = await fetchApi("/v1/chat/completions", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
           body: JSON.stringify({
-            model: "deepseek-v4-pro",
+            model: detectModel,
             messages: [
               { role: "system", content: DETECTION_PROMPT },
               { role: "user", content: `剧本内容：\n${scriptText}` },

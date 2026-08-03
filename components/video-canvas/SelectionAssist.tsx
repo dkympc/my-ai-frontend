@@ -11,6 +11,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Wand2, X, Loader2, Check, Send } from 'lucide-react';
+import { fetchApi } from '@/services/api';
+import { useAppStore } from '@/store/useAppStore';
 
 interface SelectionInfo {
   selectedText: string;
@@ -122,11 +124,11 @@ export default function SelectionAssist() {
 - 回复简洁精准，不啰嗦`;
 
       const token = localStorage.getItem('yr-ai-token');
-      const response = await fetch('/v1/chat/completions', {
+      const assistModel = useAppStore.getState().canvasSettings?.defaultLLMModel || 'gpt-5.4';
+      const response = await fetchApi('/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({
-          model: 'gpt-5.4',
+          model: assistModel,
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: dialogInput.trim() }

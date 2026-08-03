@@ -8,6 +8,8 @@
 
 import { useState, useCallback, useRef } from 'react';
 import { CANVAS_MANUAL } from '@/lib/canvas-manual';
+import { fetchApi } from '@/services/api';
+import { useAppStore } from '@/store/useAppStore';
 
 // ==========================================
 // 类型定义
@@ -452,10 +454,10 @@ ${edgeLines || '  （无连线）'}
       }));
 
       const token = localStorage.getItem('yr-ai-token');
-      const response = await fetch('/v1/chat/completions', {
+      const copilotModel = useAppStore.getState().canvasSettings?.defaultLLMModel || 'gpt-5.4';
+      const response = await fetchApi('/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ model: 'gpt-5.4', messages: [{ role: 'system', content: systemPrompt }, ...allMsgs], stream: true }),
+        body: JSON.stringify({ model: copilotModel, messages: [{ role: 'system', content: systemPrompt }, ...allMsgs], stream: true }),
         signal: abortController.signal,
       });
 

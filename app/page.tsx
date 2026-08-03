@@ -1003,7 +1003,7 @@ export default function ChatPage() {
         {/* Toast 通知（风格统一为液态玻璃）            */}
         {/* ========================================== */}
         {toastMsg && (
-          <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[99999] px-6 py-3 rounded-full animate-in slide-in-from-top-4 fade-in"
+          <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100001] px-6 py-3 rounded-full animate-in slide-in-from-top-4 fade-in"
                style={{
                  background: 'linear-gradient(180deg, rgba(20,20,20,0.85), rgba(8,8,8,0.9))',
                  backdropFilter: 'blur(20px)',
@@ -1354,7 +1354,7 @@ export default function ChatPage() {
 
       {/* 顶部提醒 */}
       {toastMsg && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 bg-[#1a1a1e]/80 backdrop-blur-2xl border border-white/10 px-6 py-2.5 rounded-full shadow-2xl flex items-center gap-3 animate-in slide-in-from-top-4 fade-in z-[99999]">
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 bg-[#1a1a1e]/80 backdrop-blur-2xl border border-white/10 px-6 py-2.5 rounded-full shadow-2xl flex items-center gap-3 animate-in slide-in-from-top-4 fade-in z-[100001]">
           <AlertTriangle size={15} className="text-indigo-400" />
           <span className="text-xs font-medium text-white">{toastMsg}</span>
         </div>

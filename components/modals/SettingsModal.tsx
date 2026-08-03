@@ -136,7 +136,7 @@ export default function SettingsModal({
         })
       });
       if (res.ok) {
-        useAppStore.getState().setToastMsg("API 配置已更新！重新登录后生效。");
+        useAppStore.getState().setToastMsg("API 配置已更新，立即生效！");
       } else {
         const data = await res.json();
         useAppStore.getState().setToastMsg(data.error?.message || "保存失败");
