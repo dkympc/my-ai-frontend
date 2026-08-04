@@ -11,9 +11,9 @@ const nextConfig = {
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: true },
   
-  // 👇 加入这块实验性配置，解除代理超时限制！
+  // 👇 代理超时对齐后端 httpx read 超时（900s），防裂变分镜长流式响应被 Next.js 代理层截断
   experimental: {
-    proxyTimeout: 300000, // 设置 rewrites 代理超时时间为 300 秒（5分钟）
+    proxyTimeout: 900000, // 15 分钟（后端 read 超时也为 900s，前端 AbortController 为 8 分钟）
   },
 
   async rewrites() {

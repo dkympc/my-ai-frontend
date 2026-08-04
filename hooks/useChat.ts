@@ -209,7 +209,9 @@ export function useChat(
     
     const payload: any = { 
       model: targetModel, messages: apiMessages, user_system_prompt: sysPrompt, 
-      stream: true, temperature: settings.temperature, top_p: settings.topP
+      stream: true, temperature: settings.temperature, top_p: settings.topP,
+      // ★ 关闭 DeepSeek 思考模式：对话场景不需要显式思维链输出，节省带宽、加速响应
+      thinking: { type: "disabled" }
     };
     if (isWebSearchEnabled) {
       payload.search = true; payload.enable_search = true; payload.network = true; 

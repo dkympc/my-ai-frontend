@@ -826,6 +826,9 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
       useAppStore.getState().setFissionProgress({ status: 'stage1', phase: '分镜拆解中...' });
       const payloadStage1 = {
         model: targetModel,
+        // ★ 关闭 DeepSeek 思考模式：阶段 1 是规则装配线任务（按公式拆镜），推理文字占带宽无意义
+        //   默认思考 effort=high 会产生巨量 reasoning_content，占满 SSE 流导致 ReadError
+        thinking: { type: "disabled" },
         messages: [
           {
             role: "system",
@@ -971,6 +974,9 @@ ${directorCtx?.llmContextBlock || ''}`
       useAppStore.getState().setFissionProgress({ status: 'stage2', phase: '首帧提取中...' });
       const payloadStage2 = {
         model: targetModel,
+        // ★ 关闭 DeepSeek 思考模式：阶段 2 是装配线任务（按 10 段公式拼接 imagePrompt），
+        //   43 行规则集的默认 effort=high 会产生 864KB 推理文字，撑满 SSE 流导致 ReadError
+        thinking: { type: "disabled" },
         messages: [
           {
             role: "system",
