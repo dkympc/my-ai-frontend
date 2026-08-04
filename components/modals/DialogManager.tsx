@@ -184,7 +184,7 @@ export default function DialogManager() {
         />
         <div className="relative w-full max-w-sm bg-[#1a1a1a] border border-white/[0.08] rounded-[28px] shadow-[0_30px_80px_rgba(0,0,0,0.8)] p-7 animate-in zoom-in-95 fade-in duration-200">
           <div className="flex items-start gap-4 mb-2">
-            <div className="w-11 h-11 rounded-2xl bg-indigo-500/10 flex items-center justify-center text-indigo-400 flex-shrink-0">
+            <div className="w-11 h-11 rounded-2xl bg-white/[0.04] border border-white/[0.06] flex items-center justify-center text-zinc-400 flex-shrink-0">
               <Info size={22} />
             </div>
             <div className="flex-1 min-w-0">

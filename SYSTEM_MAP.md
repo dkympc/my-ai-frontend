@@ -1,6 +1,6 @@
 ﻿# 依然AI (YR AI) — 系统架构地图
 
-> **最后更新：** 2026-08-04（✅ 裂变分镜 500 修复已确认生效：超时对齐 + 思考模式关闭）  
+> **最后更新：** 2026-08-04（✅ Copilot 5分超时兜底 + !fission/!camera/!asset/!table 画布全操作指令）  
 > **维护规则：** 每次新增功能、修改数据库结构、改变核心数据流时，必须同步更新本文档。  
 > **读者：** Owner（非技术背景，但需 100% 掌控项目脉络）
 
@@ -1788,6 +1788,7 @@ npm run dev
 | 2026-08-04 | **第二十二阶段-架构整改与体验优化（完整版）：① P0 三页面路由架构恢复——从 Git 历史 cherry-pick c88bceb/bd79edd/b73e4ca 三个丢失提交 ② P1 在线状态修复——心跳接口恢复 UPDATE users SET last_active_at ③ P2 分镜裂变进度条——fissionProgress 统一状态驱动 + 中止按钮 + AbortController 8分钟超时兜底 ④ P3 长剧本智能压缩——preSummarizeScript() LLM 预摘要 ⑤ P4 摄影机提取改造——Toast 蹦代码改为统一进度条 + AbortController ⑥ P5 资产提取改造——同上 ⑦ P6 表格生成 LLM 化——handleFissionTable 从硬编码占位改为 LLM 真实生成 ⑧ P7 UI 风格统一——EpisodeSelectModal(8处) + VideoCanvas(5处) + CustomNodes(2处) + CopilotMessage(3处) 共 18 处鲜艳颜色替换为黑色液态玻璃风格 ⑨ 提示词零删减** | app/page.tsx / app/login/page.tsx / app/workspace/page.tsx / app/workspace/WorkspaceApp.tsx / main.py / useAppStore.ts / VideoCanvas.tsx / CustomNodes.tsx / EpisodeSelectModal.tsx / CopilotMessage.tsx / SYSTEM_MAP.md |
 | 2026-08-04 | **裂变分镜 500 超时修复：① 后端 main.py httpx 全局超时拆细——connect=30s / read=900s(15分钟) / write=60s / pool=30s，旧配置 httpx.Timeout(300) 所有操作一视同仁，长流式响应超 5 分钟即 ReadError→前端 500 ② 后端两个 stream_generator（聊天 + 工作流）新增 ReadError 捕获——已发数据不丢，注入 SSE error 事件告知前端流中断，不再炸 ASGI 级异常 ③ 前端 next.config.js proxyTimeout 300000→900000（5分钟→15分钟），对齐后端超时，消除代理层瓶颈** | main.py / next.config.js / SYSTEM_MAP.md |
 | 2026-08-04 | **DeepSeek 思考模式关闭（三处）：DeepSeek 默认 thinking effort=high，模型在输出最终答案前先输出巨量 reasoning_content（思维链文字），阶段 2 实测 864KB 中 ~859KB 是丢弃的思考 token，占满 SSE 流带宽导致连接断开（httpx.ReadError）。官方文档确认：①关闭思考不影响模型内部推理 ②多轮对话中 reasoning_content 无工具调用时传回也会被忽略。三处 payload 加入 `thinking: { type: "disabled" }`——① payloadStage1（阶段 1 拆镜）② payloadStage2（阶段 2 首帧提取）③ useChat.ts 主页对话** | CustomNodes.tsx / useChat.ts / SYSTEM_MAP.md |
+| 2026-08-04 | **第二十五阶段-Copilot 画布全操作 + UI 整改：① CopilotPanel 改为右侧固定侧边栏（420px，flex row 同层布局，去拖拽+去 Portal）② 删除时空回收站 UI + AssetDock 浮空带 ③ sendMessage 加 5 分超时兜底 ④ !command 新增 !fission/!camera/!asset/!table 四种画布操作指令 ⑤ _copilotAction 触发标志 + useEffect 桥接 ⑥ canvas-manual 全量重写 ⑦ 弹窗去蓝底（DialogManager/SearchModal/FilePreviewModal） ⑧ 落地页「大师级分镜管线」→「双阶段分镜管线」⑨ 创作助手按钮移至右上角** | VideoCanvas.tsx / CopilotPanel.tsx / CustomNodes.tsx / useCanvasCopilot.ts / canvas-manual.ts / DialogManager.tsx / SearchModal.tsx / FilePreviewModal.tsx / page.tsx / SYSTEM_MAP.md |
 
 ---
 

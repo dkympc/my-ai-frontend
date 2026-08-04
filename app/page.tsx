@@ -351,7 +351,7 @@ export default function LandingPage() {
                 <GitBranch size={20} className="text-zinc-500" />
                 <span className="text-xs tracking-[0.3em] text-zinc-600 font-light uppercase">Dual-Stage Pipeline</span>
               </div>
-              <h2 className="section-reveal section-reveal-d2 text-4xl md:text-6xl font-light text-white tracking-[0.05em] mb-8 leading-tight">三权分立<br />大师级分镜管线</h2>
+              <h2 className="section-reveal section-reveal-d2 text-4xl md:text-6xl font-light text-white tracking-[0.05em] mb-8 leading-tight">三权分立<br />双阶段分镜管线</h2>
               <p className="section-reveal section-reveal-d3 text-sm md:text-base text-zinc-500 leading-relaxed font-light mb-8 max-w-lg">
                 独创双阶段架构：调度层统一规划光影、节奏、镜头语言；执行层严格按调度结果生成画面，两层互不干扰，彻底杜绝 AI 随意发挥。
               </p>

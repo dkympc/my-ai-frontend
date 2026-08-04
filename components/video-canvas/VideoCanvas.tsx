@@ -24,11 +24,10 @@ import {
 import '@xyflow/react/dist/style.css'; 
 
 // 🚀 唯一引用的 lucide-react，完美避开所有重名报错
-import { ArrowLeft, Plus, Type, Image as ImageIconIcon, Film, ZoomIn, ZoomOut, Maximize, Clapperboard, Layers, Check, Settings, X, Loader2, RotateCcw, Sliders, ChevronDown, MessageSquare } from 'lucide-react';
+import { ArrowLeft, Plus, Type, Image as ImageIconIcon, Film, ZoomIn, ZoomOut, Maximize, Clapperboard, Layers, Check, Settings, X, Loader2, Sliders, ChevronDown, MessageSquare } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { GENRE_PRESETS, TEMPO_PROFILES } from '@/lib/director-rules';
 import { MODELS } from '@/lib/constants';
-import AssetDock from './AssetDock'; 
 import { ImageRecord, VideoRecord } from '@/lib/types'; 
 import { fetchApi } from '@/services/api';
 import { showConfirm } from '@/lib/dialogStore';
@@ -151,8 +150,7 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
   // ★ 通用撤销快照堆栈（覆盖文本编辑、节点移动等非删除变更），节流采集防内存溢出
   const [undoHistory, setUndoHistory] = useState<{nodes: any[], edges: any[]}[]>([]);
   const undoThrottleRef = useRef<NodeJS.Timeout | null>(null);
-  const [deletedNodes, setDeletedNodes] = useState<any[]>([]); // ✨ 新增：时空回收站软删除备份栈
-  const [isRecyclerOpen, setIsRecyclerOpen] = useState(false); // ✨ 新增：时空回收站展开状态
+  // ★ 时空回收站已移除：用户使用 Ctrl+Z 撤销即可
 
   // ★★★ AI 画布副驾驶引擎 ★★★
   const copilot = useCanvasCopilot({
@@ -212,7 +210,7 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
     return () => window.removeEventListener('wheel', preventBrowserZoom, { capture: true });
   }, []);
 
-  // ✨【中控容灾】自定义节点变更拦截器 (拦截误删 + 时空软删除)
+  // ✨ 自定义节点变更拦截器 (核心节点误删保护 + 删除历史快照供 Ctrl+Z 撤销)
   const customOnNodesChange = useCallback((changes: any[]) => {
     const currentNodes = nodesRef.current;
     const currentEdges = edgesRef.current;
@@ -224,93 +222,21 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
       });
       
       if (hasCriticalNode) {
-        const capturedNodes = currentNodes;
-        const capturedEdges = currentEdges;
         showConfirm("⚠️ 主中控/资产表为分镜核心", "您确定要删除吗?", "danger").then((confirmed) => {
           if (!confirmed) return;
-          const newDeletedRecords: any[] = [];
-          removeChanges.forEach(change => {
-            const nodeToDelete = capturedNodes.find(n => n.id === change.id);
-            if (nodeToDelete) {
-              const connectedEdges = capturedEdges.filter(e => e.source === nodeToDelete.id || e.target === nodeToDelete.id);
-              newDeletedRecords.push({
-                id: nodeToDelete.id,
-                node: nodeToDelete,
-                edges: connectedEdges,
-                deletedAt: Date.now()
-              });
-            }
-          });
-          if (newDeletedRecords.length > 0) {
-            setDeletedNodes(prev => [...newDeletedRecords, ...prev]);
-            setDeleteHistory(prev => [...prev, { nodes: capturedNodes, edges: capturedEdges }]);
-          }
+          // 删除前拍快照，供 Ctrl+Z 撤销
+          setDeleteHistory(prev => [...prev.slice(-4), { nodes: JSON.parse(JSON.stringify(currentNodes)), edges: JSON.parse(JSON.stringify(currentEdges)) }]);
           onNodesChange(changes);
         });
         return;
       }
       
-      const newDeletedRecords: any[] = [];
-      removeChanges.forEach(change => {
-        const nodeToDelete = currentNodes.find(n => n.id === change.id);
-        if (nodeToDelete) {
-          const connectedEdges = currentEdges.filter(e => e.source === nodeToDelete.id || e.target === nodeToDelete.id);
-          newDeletedRecords.push({
-            id: nodeToDelete.id,
-            node: nodeToDelete,
-            edges: connectedEdges,
-            deletedAt: Date.now()
-          });
-        }
-      });
-      
-      if (newDeletedRecords.length > 0) {
-        setDeletedNodes(prev => [...newDeletedRecords, ...prev]);
-        setDeleteHistory(prev => [...prev, { nodes: currentNodes, edges: currentEdges }]);
-      }
+      // 普通节点删除：拍快照供 Ctrl+Z 撤销
+      setDeleteHistory(prev => [...prev.slice(-4), { nodes: JSON.parse(JSON.stringify(currentNodes)), edges: JSON.parse(JSON.stringify(currentEdges)) }]);
     }
     
     onNodesChange(changes);
   }, [onNodesChange]);
-
-  // ✨【中控容灾】从时空裂隙中完美恢复节点与其物理连线和各种状态
-  const handleRestoreNode = useCallback((recordId: string) => {
-    const record = deletedNodes.find(r => r.id === recordId);
-    if (!record) return;
-    
-    // 1. 将节点放回 nodes (防止因某种情况发生重复添加)
-    setNodes(nds => {
-      if (nds.some(n => n.id === record.node.id)) return nds;
-      return [...nds, record.node];
-    });
-    
-    // 2. 将连线放回 edges (只要连线的另一端在画布中，就原汁原味重连)
-    setEdges(eds => {
-      const restoredEdges = record.edges.filter(edge => {
-        const sourceExists = getNodes().some(n => n.id === edge.source) || edge.source === record.node.id;
-        const targetExists = getNodes().some(n => n.id === edge.target) || edge.target === record.node.id;
-        return sourceExists && targetExists && !eds.some(e => e.id === edge.id);
-      });
-      return [...eds, ...restoredEdges];
-    });
-    
-    // 3. 从时空碎片列表清除
-    setDeletedNodes(prev => prev.filter(r => r.id !== recordId));
-    
-    const nodeTypeLabel = 
-      record.node.type === 'masterScript' ? '主剧本中控台' :
-      record.node.type === 'assetTable' ? '数据资产表' :
-      record.node.type === 'shot' ? `🎬 分镜 ${record.node.data?.shotNumber || ''}` : '卡片节点';
-    
-    useAppStore.getState().setToastMsg(`✅ 【${nodeTypeLabel}】已从时空裂隙中完美复活！`);
-  }, [deletedNodes, setNodes, setEdges, getNodes]);
-
-  // ✨【中控容灾】清空时空碎片
-  const handleClearRecycler = useCallback(() => {
-    setDeletedNodes([]);
-    setIsRecyclerOpen(false);
-    useAppStore.getState().setToastMsg("🧹 时空裂隙已彻底净化清空。");
-  }, []);
 
   // ✨ 实时监测变动并触发自动保存 (加入防抖与初次挂载拦截)
   const isFirstRender = useRef(true);
@@ -842,12 +768,11 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
   return (
     <div 
       ref={wrapperRef} 
-      className="w-full h-full relative bg-[#020203] animate-in fade-in duration-500 overflow-hidden" 
+      className="w-full h-full flex bg-[#020203] animate-in fade-in duration-500 overflow-hidden" 
       style={{ cursor: glassCursor }} 
-      onDragOver={onDragOver} 
-      onDrop={onDrop} 
-      onClick={handleCanvasClick}
     >
+      {/* ===== 左侧：画布主区域 ===== */}
+      <div className="flex-1 min-w-0 relative" onDragOver={onDragOver} onDrop={onDrop} onClick={handleCanvasClick}>
       {/* ========================================== */}
       {/* 🎬 黑色液态玻璃影视总控抽屉 (Film Control Center) */}
       {/* ========================================== */}
@@ -1105,13 +1030,6 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
         document.body
       )}
 
-      {/* ★★★ 创作助手全局面板 ★★★ */}
-      <CopilotPanel 
-        isOpen={copilotIsOpen} 
-        onClose={() => setCopilotIsOpen(false)} 
-        copilot={copilot} 
-      />
-
       {/* ★★★ 全局文字选中 AI 助手 — 仅当用户在设置中开启时渲染 ★★★ */}
       {selectionAssistEnabled && <SelectionAssist />}
       {ripples.map(r => (
@@ -1193,19 +1111,6 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
           影视总控
         </button>
 
-        {/* ✨ 新增：创作助手一键开关 Pill 按钮 */}
-        <button 
-          onClick={() => setCopilotIsOpen(!copilotIsOpen)}
-          className={`h-10 px-4 rounded-full backdrop-blur-3xl border flex items-center gap-2 text-[12px] font-bold tracking-widest transition-all duration-300 shadow-[0_10px_30px_rgba(0,0,0,0.8)] hover:scale-105 ${
-            copilotIsOpen 
-              ? 'bg-white/[0.08] border-white/[0.15] text-zinc-300' 
-              : 'bg-black/60 border-white/[0.08] text-zinc-400 hover:text-white hover:border-white/20'
-          }`}
-        >
-          <MessageSquare size={14} className={copilotIsOpen ? 'text-zinc-300' : 'text-zinc-500'} />
-          创作助手
-        </button>
-
         <div className="h-10 px-4 rounded-full bg-black/60 backdrop-blur-3xl border border-white/[0.08] shadow-[0_10px_30px_rgba(0,0,0,0.8)] flex items-center gap-3 group hover:border-white/20 transition-all duration-300">
           <input
             type="text"
@@ -1234,8 +1139,21 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
           </div>
         </div>
       </div>
-      {/* 右上角：全局配置齿轮 */}
-      <div className="absolute top-6 right-[100px] z-50">
+      {/* 右上角：创作助手 + 全局配置齿轮 */}
+      <div className="absolute top-6 right-6 z-50 flex items-center gap-3">
+        {/* 创作助手 */}
+        <button 
+          onClick={() => setCopilotIsOpen(!copilotIsOpen)}
+          className={`h-10 px-4 rounded-full backdrop-blur-3xl border flex items-center gap-2 text-[12px] font-bold tracking-widest transition-all duration-300 shadow-[0_10px_30px_rgba(0,0,0,0.8)] hover:scale-105 ${
+            copilotIsOpen 
+              ? 'bg-white/[0.08] border-white/[0.15] text-zinc-300' 
+              : 'bg-black/60 border-white/[0.08] text-zinc-400 hover:text-white hover:border-white/20'
+          }`}
+        >
+          <MessageSquare size={14} className={copilotIsOpen ? 'text-zinc-300' : 'text-zinc-500'} />
+          创作助手
+        </button>
+        {/* 设置齿轮 */}
         <button 
           onClick={() => setIsCanvasSettingsOpen(true)} 
           className="w-10 h-10 rounded-full bg-black/60 backdrop-blur-3xl border border-white/[0.08] flex items-center justify-center text-zinc-400 hover:text-white hover:bg-white/10 transition-all shadow-[0_10px_30px_rgba(0,0,0,0.8)] hover:scale-105 hover:rotate-90 duration-500"
@@ -1279,12 +1197,7 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
         }
       `}</style>
 
-      {/* 资产库组件 */}
-      <AssetDock 
-        imageHistory={imageHistory} 
-        videoHistory={videoHistory} 
-        localAssets={currentProject?.localAssets || []} 
-      />
+      {/* Assets dock removed — new asset entry point coming later */}
 
       {/* 全局设置弹窗 (晶体药丸网格版) */}
       {isCanvasSettingsOpen && (
@@ -1394,92 +1307,6 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
         </div>
       )}
 
-      {/* ✨ 右下角：时空回收站 (Space Recycler) 悬浮舱 */}
-      <div className="absolute bottom-24 right-6 z-50 flex flex-col items-end gap-3">
-        {/* 回收站展开面板 */}
-        {isRecyclerOpen && (
-          <div className="w-[280px] max-h-[360px] flex flex-col bg-[#050507]/90 backdrop-blur-3xl border border-white/[0.08] rounded-[24px] shadow-[0_30px_80px_rgba(0,0,0,0.95),inset_0_1px_1px_rgba(255,255,255,0.08)] overflow-hidden animate-in fade-in slide-in-from-bottom-5 duration-300" onClick={e => e.stopPropagation()}>
-            {/* 面板顶栏 */}
-            <div className="px-4 py-3 border-b border-white/[0.05] flex items-center justify-between bg-white/[0.01]">
-              <span className="text-[10px] font-extrabold text-zinc-300 tracking-[0.2em] flex items-center gap-1.5 uppercase">
-                <RotateCcw size={12} className="text-zinc-400" />
-                时空回收站 ({deletedNodes.length})
-              </span>
-              <button onClick={() => setIsRecyclerOpen(false)} className="text-zinc-500 hover:text-white transition-colors">
-                <X size={14} />
-              </button>
-            </div>
-            
-            {/* 面板内容列表 */}
-            <div className="flex-1 p-3 overflow-y-auto custom-scrollbar flex flex-col gap-2 min-h-[120px]">
-              {deletedNodes.length === 0 ? (
-                <div className="flex-1 flex flex-col items-center justify-center py-10 text-zinc-600 text-[11px] font-light">
-                  <RotateCcw size={20} className="mb-2 text-zinc-700 opacity-50" />
-                  时空裂隙中暂无残留碎片
-                </div>
-              ) : (
-                deletedNodes.map((record) => {
-                  const nodeTypeLabel = 
-                    record.node.type === 'masterScript' ? '📝 中控台' :
-                    record.node.type === 'assetTable' ? '📊 资产表' :
-                    record.node.type === 'shot' ? `🎬 分镜 ${record.node.data?.shotNumber || ''}` :
-                    record.node.type === 'media' ? '🖼️ 图像' :
-                    record.node.type === 'render' ? '🎞️ 视频' : '📦 节点';
-                  
-                  return (
-                    <div key={record.id} className="flex items-center justify-between p-2.5 rounded-[12px] bg-black/40 border border-white/[0.03] hover:border-white/[0.1] transition-all group/item shadow-inner">
-                      <div className="flex flex-col gap-0.5 overflow-hidden pr-2">
-                        <span className="text-[11px] font-bold text-zinc-200 truncate">{nodeTypeLabel}</span>
-                        <span className="text-[9px] text-zinc-600 font-mono">
-                          {new Date(record.deletedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                        </span>
-                      </div>
-                      
-                      <button 
-                        onClick={() => handleRestoreNode(record.id)}
-                        className="px-2.5 py-1.5 rounded-[8px] border border-white/[0.05] bg-white/[0.02] hover:bg-white/[0.1] text-zinc-300 hover:text-white text-[10px] font-bold tracking-widest transition-all active:scale-95 shrink-0 nodrag"
-                      >
-                        还原
-                      </button>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-            
-            {/* 清空回收站按钮 */}
-            {deletedNodes.length > 0 && (
-              <div className="p-2 border-t border-white/[0.05] bg-white/[0.01]">
-                <button 
-                  onClick={handleClearRecycler}
-                  className="w-full py-1.5 rounded-[10px] hover:bg-red-500/10 hover:text-red-400 text-zinc-500 text-[10px] font-medium tracking-widest transition-all nodrag"
-                >
-                  清空全部时空碎片
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* 悬浮圆形气泡按钮 */}
-        <button 
-          onClick={(e) => { e.stopPropagation(); setIsRecyclerOpen(!isRecyclerOpen); }}
-          className={`w-10 h-10 rounded-full backdrop-blur-3xl border shadow-[0_10px_30px_rgba(0,0,0,0.8)] flex items-center justify-center transition-all duration-300 relative group/btn hover:scale-105 active:scale-95 ${
-            isRecyclerOpen 
-              ? 'bg-white/20 border-white/30 text-white' 
-              : 'bg-black/60 border-white/[0.08] text-zinc-400 hover:text-white hover:border-white/20'
-          }`}
-        >
-          <RotateCcw size={16} className={`transition-transform duration-500 ${isRecyclerOpen ? 'rotate-180' : 'group-hover/btn:rotate-45'}`} />
-          {/* 未读数字标记 */}
-          {deletedNodes.length > 0 && (
-            <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-white text-black font-mono text-[9px] font-extrabold flex items-center justify-center shadow-[0_0_8px_rgba(255,255,255,0.8)] animate-bounce">
-              {deletedNodes.length}
-            </span>
-          )}
-        </button>
-      </div>
-
       {/* 双击/右键菜单 */}
       {menuPos && (
         <div className="absolute z-[1000] w-[200px] bg-[#0a0a0a]/90 backdrop-blur-3xl border border-white/[0.08] rounded-[24px] shadow-[0_30px_60px_rgba(0,0,0,0.9)] p-2 animate-in fade-in zoom-in-95 duration-100" style={{ top: menuPos.y, left: menuPos.x }} onClick={(e) => e.stopPropagation()}>
@@ -1504,9 +1331,16 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
                <div className="w-7 h-7 rounded-[10px] bg-[#050505] relative overflow-hidden border border-white/[0.08] shadow-[inset_0_1px_1px_rgba(255,255,255,0.1),0_2px_8px_rgba(0,0,0,0.5)] flex items-center justify-center group-hover:border-white/[0.2] transition-all"><Layers size={12} className="text-zinc-200" /></div>
               合成节点
             </button>
-          </div>
+           </div>
         </div>
       )}
+      </div>
+      {/* ===== 左侧画布区域结束 ===== */}
+
+      {/* ===== 右侧：创作助手侧边栏 ===== */}
+      <div className={`h-full flex-shrink-0 transition-all duration-300 ease-in-out border-l border-white/[0.06] bg-[#08080a]/95 backdrop-blur-3xl flex flex-col ${copilotIsOpen ? 'w-[420px]' : 'w-0 overflow-hidden border-l-0'}`}>
+        <CopilotPanel isOpen={copilotIsOpen} onClose={() => setCopilotIsOpen(false)} copilot={copilot} />
+      </div>
     </div>
   );
 }

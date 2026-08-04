@@ -17,7 +17,7 @@ export default function FilePreviewModal({ previewFileContent, setPreviewFileCon
       <div className="relative w-full max-w-3xl bg-[#171717] border border-white/10 rounded-2xl shadow-2xl flex flex-col animate-in zoom-in-95 fade-in duration-200 h-[80vh] overflow-hidden">
         <div className="flex items-center justify-between p-4 border-b border-white/5 bg-[#1a1a1a]">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-indigo-500/10 rounded-lg flex items-center justify-center text-indigo-400">
+            <div className="w-8 h-8 bg-white/[0.04] rounded-lg flex items-center justify-center text-zinc-400">
               <FileText size={18} />
             </div>
             <div>

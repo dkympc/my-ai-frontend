@@ -41,7 +41,7 @@ export default function SearchModal({
             <div className="space-y-1">
               {searchResults.map((result: any) => (
                 <div key={result.id} onClick={() => { setCurrentSessionId(result.id); setActiveView('chat'); setIsSearchModalOpen(false); setSearchQuery(""); }} className="group cursor-pointer p-3.5 rounded-xl hover:bg-white/5 transition-all flex flex-col gap-2">
-                  <div className="flex items-center justify-between"><div className="flex items-center gap-2.5 text-zinc-200 font-medium text-sm"><MessageSquare size={16} className="text-indigo-400 opacity-80" /><span>{result.title}</span></div><div className="text-[10px] text-zinc-600 font-mono">{new Date(result.updatedAt).toLocaleDateString()}</div></div>
+                  <div className="flex items-center justify-between"><div className="flex items-center gap-2.5 text-zinc-200 font-medium text-sm"><MessageSquare size={16} className="text-zinc-400 opacity-60" /><span>{result.title}</span></div><div className="text-[10px] text-zinc-600 font-mono">{new Date(result.updatedAt).toLocaleDateString()}</div></div>
                   {result.snippet && <div className="text-xs text-zinc-500 pl-7 line-clamp-1 leading-relaxed">{result.snippet}</div>}
                 </div>
               ))}

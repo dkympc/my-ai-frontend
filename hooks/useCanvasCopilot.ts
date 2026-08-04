@@ -33,7 +33,7 @@ export interface CopilotConversation {
 export interface ParsedAction {
   type: 'batchUpdateByType' | 'batchUpdateByFilter' | 'updateField' | 'batchAppendSuffix'
        | 'deleteNode' | 'addNode' | 'addEdge' | 'deleteEdge' | 'moveNode'
-       | 'batchDeleteByType';
+       | 'batchDeleteByType' | 'fission' | 'camera' | 'assetTable' | 'table';
   nodeType?: string;
   nodeId?: string;
   field: string;
@@ -227,6 +227,31 @@ function parseOneCommand(line: string): ParsedAction | null {
     };
   }
 
+  // !fission <masterScriptNodeId> — 对指定主控节点执行裂变分镜
+  match = line.match(/^!fission\s+(\S+)$/i);
+  if (match) {
+    return { type: 'fission', field: '', targetId: match[1], description: `对 ${match[1]} 执行分镜裂变` };
+  }
+
+  // !camera <masterScriptNodeId> — 对指定主控节点提取摄影机参数
+  match = line.match(/^!camera\s+(\S+)$/i);
+  if (match) {
+    return { type: 'camera', field: '', targetId: match[1], description: `对 ${match[1]} 提取摄影机参数` };
+  }
+
+  // !asset <masterScriptNodeId> <type> — 提取资产表 (type: scene/character/prop，不写则全提)
+  match = line.match(/^!asset\s+(\S+)(?:\s+(\S+))?$/i);
+  if (match) {
+    const assetType = match[2] || 'all';
+    return { type: 'assetTable', field: assetType, targetId: match[1], description: `对 ${match[1]} 提取资产表(${assetType})` };
+  }
+
+  // !table <masterScriptNodeId> — 对指定主控节点生成分镜场记表
+  match = line.match(/^!table\s+(\S+)$/i);
+  if (match) {
+    return { type: 'table', field: '', targetId: match[1], description: `对 ${match[1]} 生成分镜表格` };
+  }
+
   return null;
 }
 
@@ -352,34 +377,70 @@ export function useCanvasCopilot({
     setConversations(prev => prev.map(c => c.id === convId ? { ...c, title } : c));
   }, []);
 
-  // ★ 构建画布快照（给 LLM 看的上下文 — 现在包含连线ID）
+  // ★ 构建画布快照（给 LLM 看的上下文 — 包含完整字段 + 资产表行 + 连线ID）
   const buildCanvasSnapshot = useCallback(() => {
     const nodes = getNodes();
-    const snapshot = nodes.map((n: any) => {
-      const extract = (data: any, keys: string[]) => {
-        const r: Record<string, any> = {};
-        for (const k of keys) {
-          if (data[k]) r[k] = typeof data[k] === 'string' && data[k].length > 200
-            ? data[k].slice(0, 200) + '...' : data[k];
+    const extract = (data: any, keys: string[]) => {
+      const r: Record<string, any> = {};
+      for (const k of keys) {
+        const v = data[k];
+        if (v === undefined || v === null || v === '') continue;
+        if (typeof v === 'string' && v.length > 300) {
+          r[k] = v.slice(0, 300) + '...(已截断)';
+        } else {
+          r[k] = v;
         }
-        return r;
-      };
+      }
+      return r;
+    };
+
+    const snapshot = nodes.map((n: any) => {
       const base: any = { id: n.id, type: n.type, position: { x: Math.round(n.position?.x || 0), y: Math.round(n.position?.y || 0) } };
       switch (n.type) {
-        case 'masterScript': base.fields = extract(n.data, ['text', 'script', 'globalRatio', 'globalPromptSuffix']); break;
-        case 'shot': base.fields = extract(n.data, ['shotNumber', 'firstFrameAnchor', 'videoPrompt', 'duration', 'ratio', 'sceneLighting', 'globalCamera', 'quality', 'model', 'styleOverride', 'status']); break;
-        case 'media': base.fields = extract(n.data, ['prompt', 'ratio', 'model', 'quality', 'styleOverride', 'status']); break;
-        case 'render': base.fields = extract(n.data, ['prompt', 'ratio', 'model', 'quality', 'status']); break;
-        case 'videoClip': base.fields = extract(n.data, ['prompt', 'ratio', 'sceneLighting', 'globalCamera', 'status']); break;
-        case 'text': base.fields = extract(n.data, ['text']); break;
-        case 'combine': base.fields = {}; break;
-        case 'scriptTable': base.fields = extract(n.data, ['scriptText', 'status']); break;
-        case 'assetTable': base.fields = extract(n.data, ['assetType', 'ratio', 'model', 'quality', 'status']); break;
-        default: base.fields = extract(n.data, ['prompt', 'text', 'ratio']); break;
+        case 'masterScript':
+          base.fields = extract(n.data, ['text', 'script', 'globalRatio', 'globalPromptSuffix', 'globalAssetPromptPrefix', 'globalCamera', 'model']);
+          break;
+        case 'shot':
+          base.fields = extract(n.data, ['shotNumber', 'firstFrameAnchor', 'videoPrompt', 'duration', 'ratio', 'sceneLighting', 'globalCamera', 'quality', 'model', 'styleOverride', 'status']);
+          break;
+        case 'media':
+          base.fields = extract(n.data, ['prompt', 'ratio', 'model', 'quality', 'styleOverride', 'status']);
+          break;
+        case 'render':
+          base.fields = extract(n.data, ['prompt', 'ratio', 'model', 'quality', 'duration', 'status']);
+          break;
+        case 'videoClip':
+          base.fields = extract(n.data, ['prompt', 'ratio', 'sceneLighting', 'globalCamera', 'model', 'status']);
+          break;
+        case 'text':
+          base.fields = extract(n.data, ['text']);
+          break;
+        case 'combine':
+          base.fields = {};
+          break;
+        case 'scriptTable':
+          base.fields = extract(n.data, ['scriptText']);
+          if (n.data?.rows) base.fields.rowCount = n.data.rows.length;
+          break;
+        case 'assetTable':
+          base.fields = extract(n.data, ['assetType', 'ratio', 'model', 'quality', 'status']);
+          // ★ 资产表的 rows 是最需要 LLM 知道的：每行 name + prompt 摘要
+          if (n.data?.rows && Array.isArray(n.data.rows)) {
+            base.fields.rowCount = n.data.rows.length;
+            // 每行只抽取 name + prompt 前100字符，防止快照过大
+            base.fields.rowsSummary = n.data.rows.map((r: any) => {
+              const promptPreview = r.prompt ? (typeof r.prompt === 'string' ? r.prompt.slice(0, 100) : String(r.prompt).slice(0, 100)) : '(空)';
+              return { id: r.id, name: r.name || '(无名)', prompt: promptPreview + (r.prompt && r.prompt.length > 100 ? '...' : ''), status: r.status || 'draft' };
+            });
+          }
+          break;
+        default:
+          base.fields = extract(n.data, ['prompt', 'text', 'ratio']);
+          break;
       }
       return base;
     });
-    // ★ 连线现在包含 ID，供 !delete_edge 使用
+    // ★ 连线包含 ID + 源/目标，供 !delete_edge / 理解画布结构
     return { nodes: snapshot, edges: getEdges().map((e: any) => ({ id: e.id, source: e.source, target: e.target })) };
   }, [getNodes, getEdges]);
 
@@ -392,7 +453,7 @@ export function useCanvasCopilot({
 
     const edgeLines = snapshot.edges.map((e: any) => `  ${e.id}: ${e.source} → ${e.target}`).join('\n');
 
-    return `你是「视觉交响空间」的创作助手，嵌入在影视级分镜画布中。你拥有画布的完整操作权限。
+    return `你是「视觉交响空间」的创作助手，嵌入在分镜画布中。你拥有画布的完整操作权限。
 
 ${CANVAS_MANUAL}
 
@@ -416,6 +477,7 @@ ${edgeLines || '  （无连线）'}
   紧接着一行一行写 !command 指令
 - 字段值修改 → !set <类型> <字段> <值>（每个类型一行）
 - 节点增删移动/连线 → 对应的 !delete / !add / !connect / !move / !delete_edge / !delete_all
+- ★ 高级画布操作 → !fission(裂变分镜) / !camera(锚定摄影机) / !asset(提取资产) / !table(生成表格)
 - ★ 示例：
   用户："把主控和分镜的摄影机改成XXX"
   你回复：
@@ -429,17 +491,31 @@ ${edgeLines || '  （无连线）'}
   !delete shot_xxx2
   !delete shot_xxx5
 
-- ★ 绝对不要只描述操作而不写 !command，那不叫"修改画布"，那叫聊天
-- ★ 绝对不要自己执行，必须等我弹窗确认后才执行`;
+  用户："给我写个故事放到节点并裂变分镜"
+  你回复：
+  好的，我先创建主控节点填入故事，然后锁定摄影机和裂变。【确认修改】
+  !add masterScript 500 300
+  （等节点创建后，在下一轮对话中填入文本并执行裂变）
+
+- ★ 不要只描述操作而不写 !command，那不叫"修改画布"，那叫聊天
+- ★ 不要自己执行，必须等我弹窗确认后才执行`;
   }, []);
 
-  // ★ 发送消息 — SSE 流式
+  // ★ 发送消息 — SSE 流式，5 分钟超时兜底
   const sendMessage = useCallback(async (userInput: string): Promise<{ message: string; intentConfirmed: boolean }> => {
     if (isProcessing) return { message: '', intentConfirmed: false };
 
     if (abortControllerRef.current) abortControllerRef.current.abort();
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
+
+    // ★ 5 分钟超时兜底：防止 LLM 响应卡住导致永久转圈
+    const timeoutId = setTimeout(() => {
+      abortController.abort();
+      updateActiveMessages(prev => [...prev, { role: 'assistant', content: '⏱️ 请求超时（5分钟），请重试或简化指令。', timestamp: Date.now() }]);
+      setIsProcessing(false);
+      abortControllerRef.current = null;
+    }, 5 * 60 * 1000);
 
     const userMsg: CopilotMessage = { role: 'user', content: userInput, timestamp: Date.now() };
     updateActiveMessages(prev => [...prev, userMsg]);
@@ -503,10 +579,13 @@ ${edgeLines || '  （无连线）'}
       const intentConfirmed = fullText.includes('【确认修改】');
       const cleanText = fullText.replace(/【确认修改】/g, '').trim();
 
+      // ★ 过滤 !command 行：用户聊天中只显示自然语言对话，不显示代码指令
+      const displayText = cleanText.split('\n').filter(line => !line.trim().match(/^!\w+/)).join('\n').trim() || cleanText;
+
       updateActiveMessages(prev => {
         const updated = [...prev];
         const last = updated[updated.length - 1];
-        if (last && last.role === 'assistant') updated[updated.length - 1] = { ...last, content: cleanText, isStreaming: false };
+        if (last && last.role === 'assistant') updated[updated.length - 1] = { ...last, content: displayText, isStreaming: false };
         return updated;
       });
 
@@ -516,9 +595,11 @@ ${edgeLines || '  （无连线）'}
       }
 
       setIsProcessing(false);
+      clearTimeout(timeoutId);
       return { message: cleanText, intentConfirmed };
 
     } catch (error: any) {
+      clearTimeout(timeoutId);
       if (error.name !== 'AbortError') {
         console.error('[创作助手 Error] 请求失败:', error);
         updateActiveMessages(prev => [...prev, { role: 'assistant', content: `请求失败：${error.message || '未知错误'}，请重试。`, timestamp: Date.now() }]);
@@ -629,6 +710,32 @@ ${edgeLines || '  （无连线）'}
           if (n.id !== action.targetId) return n;
           count++;
           return { ...n, position: { x: action.position!.x, y: action.position!.y } };
+        });
+      }
+      // ========== ★ 画布操作触发器：设置 _copilotAction 标志，由 CustomNodes.tsx 监听并执行 ==========
+      else if (action.type === 'fission' && action.targetId) {
+        updated = updated.map(n => {
+          if (n.id !== action.targetId || n.type !== 'masterScript') return n;
+          count++;
+          return { ...n, data: { ...n.data, _copilotAction: { type: 'fission', timestamp: Date.now() } } };
+        });
+      } else if (action.type === 'camera' && action.targetId) {
+        updated = updated.map(n => {
+          if (n.id !== action.targetId || n.type !== 'masterScript') return n;
+          count++;
+          return { ...n, data: { ...n.data, _copilotAction: { type: 'camera', timestamp: Date.now() } } };
+        });
+      } else if (action.type === 'assetTable' && action.targetId) {
+        updated = updated.map(n => {
+          if (n.id !== action.targetId || n.type !== 'masterScript') return n;
+          count++;
+          return { ...n, data: { ...n.data, _copilotAction: { type: 'asset', subType: action.field || 'all', timestamp: Date.now() } } };
+        });
+      } else if (action.type === 'table' && action.targetId) {
+        updated = updated.map(n => {
+          if (n.id !== action.targetId || n.type !== 'masterScript') return n;
+          count++;
+          return { ...n, data: { ...n.data, _copilotAction: { type: 'table', timestamp: Date.now() } } };
         });
       }
 

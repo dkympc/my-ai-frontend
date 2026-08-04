@@ -1325,6 +1325,57 @@ ${directorCtx?.llmContextBlock || ''}`
     }
   };
 
+  // ★★★ Copilot 画布操作监听器：当 _copilotAction 被设置时，自动触发对应的画布操作 ★★★
+  useEffect(() => {
+    const action = data._copilotAction;
+    if (!action) return;
+
+    // 立即清除触发标志（防止重复触发）
+    updateNodeData(id, { _copilotAction: null });
+
+    const runAction = async () => {
+      try {
+        if (action.type === 'fission') {
+          // 裂变分镜：使用全部剧本内容
+          if (!data.text) {
+            useAppStore.getState().setToastMsg("⚠️ 请先输入剧本内容");
+            return;
+          }
+          if (!selectedText) setSelectedText(data.text);
+          setTimeout(() => handleFissionShots(), 100);
+        } else if (action.type === 'camera') {
+          if (!data.text) {
+            useAppStore.getState().setToastMsg("⚠️ 请先输入剧本内容");
+            return;
+          }
+          handleExtractCamera();
+        } else if (action.type === 'asset') {
+          if (!data.text) {
+            useAppStore.getState().setToastMsg("⚠️ 请先输入剧本内容");
+            return;
+          }
+          const subType = (action as any).subType || 'all';
+          if (subType === 'all') {
+            getOrOpenEpisodeSelect('asset', 'scene');
+          } else {
+            getOrOpenEpisodeSelect('asset', subType);
+          }
+        } else if (action.type === 'table') {
+          if (!data.text) {
+            useAppStore.getState().setToastMsg("⚠️ 请先输入剧本内容");
+            return;
+          }
+          if (!selectedText) setSelectedText(data.text);
+          setTimeout(() => handleFissionTable(), 100);
+        }
+      } catch (e) {
+        console.error('[Copilot Action Error]', e);
+      }
+    };
+
+    runAction();
+  }, [data._copilotAction]);
+
   return (
     <>
     <div className="relative group/node z-30 flex flex-col" style={{ width: '100%', height: '100%', minWidth: '480px', minHeight: '420px' }}>
@@ -2169,7 +2220,7 @@ const _VideoClipNode = ({ id, data, selected }: any) => {
       // ★ 函数式更新：从状态机原子快照读取最新 localAssets，杜绝竞态覆盖
       updateCanvasProject(activeCanvasProjectId, (prev: any) => ({ localAssets: [asset, ...(prev?.localAssets || [])] }));
       useAppStore.getState().setToastMsg(`✅ 视频已存入侧边栏资产库！`);
-    };
+  };
 
   return (
     <div className="relative w-[360px] group/videonode z-20">
