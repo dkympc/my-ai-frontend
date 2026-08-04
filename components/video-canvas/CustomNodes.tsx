@@ -1,4 +1,4 @@
-﻿import React, { useState, useRef, useEffect } from 'react';
+﻿import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom'; // ✨ 新增：用于渲染悬浮顶层的禅定舱
 import { Handle, Position, useReactFlow, NodeResizeControl, useEdges, useNodes } from '@xyflow/react';
 import { 
@@ -208,6 +208,11 @@ const handleLeft = `${handleBase} !-left-[12px]`;
 const handleRight = `${handleBase} !-right-[12px]`;
 // (这里保留你原本的 MentionTextarea 和 CustomSelect 代码...)
 
+// ★ 全局比例映射表（模块级常量，避免每次渲染重复创建）
+const RATIO_ASPECT_ONLY: Record<string, React.CSSProperties> = { '16:9': { aspectRatio: '16/9' }, '9:16': { aspectRatio: '9/16' }, '1:1': { aspectRatio: '1/1' }, '4:3': { aspectRatio: '4/3' }, '3:4': { aspectRatio: '3/4' } };
+const MEDIA_RATIO_MAP: Record<string, React.CSSProperties> = { '16:9': { width: '320px', aspectRatio: '16/9' }, '9:16': { width: '220px', aspectRatio: '9/16' }, '1:1': { width: '260px', aspectRatio: '1/1' }, '4:3': { width: '280px', aspectRatio: '4/3' }, '3:4': { width: '240px', aspectRatio: '3/4' } };
+const RENDER_RATIO_MAP: Record<string, React.CSSProperties> = { '16:9': { width: '400px', aspectRatio: '16/9' }, '9:16': { width: '260px', aspectRatio: '9/16' }, '1:1': { width: '320px', aspectRatio: '1/1' }, '4:3': { width: '380px', aspectRatio: '4/3' }, '3:4': { width: '320px', aspectRatio: '3/4' } };
+
 // ==========================================
 // ==========================================
 // ✨ 全新组件：支持 @ 唤出的超级输入框 (大图预览 + 实体命名)
@@ -336,7 +341,7 @@ function CustomSelect({ value, options, onChange, icon: Icon, className = "", me
 // ==========================================
 // 1. 主剧本节点 (MasterScriptNode) —— "制片人总控台" + 悬浮场记抽屉
 // ==========================================
-export const MasterScriptNode = ({ id, data, selected }: any) => {
+const _MasterScriptNode = ({ id, data, selected }: any) => {
   const { updateNodeData, setNodes, setEdges, getNodes, getEdges } = useReactFlow();
   const [selectedText, setSelectedText] = useState("");
   const [selectionRange, setSelectionRange] = useState({ start: 0, end: 0 });
@@ -1488,13 +1493,14 @@ ${directorCtx?.llmContextBlock || ''}`
   </>
   );
 };
+export const MasterScriptNode = React.memo(_MasterScriptNode);
 // ==========================================
 // ==========================================
 // ==========================================
 // ==========================================
 // 2. 独立分镜节点 (ShotNode) —— 双轨质检员 + 参数胶囊
 // ==========================================
-export const ShotNode = ({ id, data, selected }: any) => {
+const _ShotNode = ({ id, data, selected }: any) => {
   const { updateNodeData, getNodes, setNodes, setEdges, getEdges } = useReactFlow();
   const edges = useEdges(); const nodes = useNodes();
 
@@ -1521,13 +1527,10 @@ export const ShotNode = ({ id, data, selected }: any) => {
   const [brushSize, setBrushSize] = useState(4);
   const imgRef = useRef<HTMLImageElement>(null);
 
-  const ratioStyleMap: Record<string, React.CSSProperties> = { '16:9': { aspectRatio: '16/9' }, '9:16': { aspectRatio: '9/16' }, '1:1': { aspectRatio: '1/1' }, '4:3': { aspectRatio: '4/3' }, '3:4': { aspectRatio: '3/4' } };
-  
-  // ✨ 核心机制：比例优先级。单分镜节点 ratio 属性最高，其次为全局穿透的 globalRatioOverride，最后默认 16:9
   const activeRatio = data.ratio || data.globalRatioOverride || '16:9';
-  const currentStyle = ratioStyleMap[activeRatio] || ratioStyleMap['16:9'];
+  const currentStyle = RATIO_ASPECT_ONLY[activeRatio] || RATIO_ASPECT_ONLY['16:9'];
 
-  const incomingAssets = edges.filter(e => e.target === id).map(e => {
+  const incomingAssets = useMemo(() => edges.filter(e => e.target === id).map(e => {
     const srcNode = nodes.find(n => n.id === e.source);
     if (srcNode?.data?.asset) return { ...srcNode.data.asset, name: srcNode.data.name || srcNode.data.asset.prompt };
     const url = srcNode?.data?.resultUrl || srcNode?.data?.frameUrl || srcNode?.data?.videoUrl;
@@ -1535,19 +1538,17 @@ export const ShotNode = ({ id, data, selected }: any) => {
        return { url, _type: url.includes('.mp4') ? 'video' : 'image', prompt: srcNode.data.prompt || srcNode.data.videoPrompt, name: srcNode.data.name || '连线参考' };
     }
     return null;
-  }).filter(Boolean);
-  console.log("🔍 ShotNode 连线信息来源:", incomingAssets);
+  }).filter(Boolean), [edges, nodes, id]);
 
   const { enqueueTask } = useCanvasEngine();
   const showToast = (msg: string) => useAppStore.getState().setToastMsg(msg);
 
-  // ✨ 新增：扫描画布上所有可用的独立资产节点
-  const availableAssets = nodes.filter(n => 
+  const availableAssets = useMemo(() => nodes.filter(n => 
     n.type === 'media' && 
     (n.data?.resultUrl || n.data?.asset?.url) && 
     n.id !== id && 
     !edges.some(e => e.source === n.id && e.target === id) 
-  );
+  ), [nodes, edges, id]);
 
   // ✨ 新增：自动施法，创建物理连线
   const handleAddAssetEdge = (sourceId: string) => {
@@ -1686,8 +1687,6 @@ export const ShotNode = ({ id, data, selected }: any) => {
       .filter(a => a && (a.url || a.asset?.url))
       .map(a => a.url || a.asset?.url)
       .filter(Boolean);
-
-    console.log("🚀 ShotNode 传参参考图:", imageUrls);
 
     // 保留写入节点数据（其他功能可能会用到），同时显式传参
     updateNodeData(id, { incomingAssets: incomingAssets });
@@ -2048,12 +2047,13 @@ export const ShotNode = ({ id, data, selected }: any) => {
     </div>
   );
 };
+export const ShotNode = React.memo(_ShotNode);
 
 // ==========================================
 // ==========================================
 // 3. 视频片段节点 (VideoClipNode) —— 终端渲染与后处理
 // ==========================================
-export const VideoClipNode = ({ id, data, selected }: any) => {
+const _VideoClipNode = ({ id, data, selected }: any) => {
   const { updateNodeData, getNodes, setNodes, setEdges } = useReactFlow();
   // ✨ 新增：用于控制美学参数微调仓的展开状态
   const [isAestheticsExpanded, setIsAestheticsExpanded] = useState(false);
@@ -2062,13 +2062,10 @@ export const VideoClipNode = ({ id, data, selected }: any) => {
   const status = data.status || 'draft'; 
   const [showConfig, setShowConfig] = useState(false);
   const [zenMode, setZenMode] = useState<any>(null);
-  const ratioStyleMap: Record<string, React.CSSProperties> = { '16:9': { aspectRatio: '16/9' }, '9:16': { aspectRatio: '9/16' }, '1:1': { aspectRatio: '1/1' }, '4:3': { aspectRatio: '4/3' }, '3:4': { aspectRatio: '3/4' } };
-  
-  // ✨ 核心机制：比例优先级。单视频节点 ratio 属性最高，其次为全局穿透的 globalRatioOverride，最后默认 16:9
   const activeRatio = data.ratio || data.globalRatioOverride || '16:9';
-  const currentStyle = ratioStyleMap[activeRatio] || ratioStyleMap['16:9'];
+  const currentStyle = RATIO_ASPECT_ONLY[activeRatio] || RATIO_ASPECT_ONLY['16:9'];
 
-  const incomingAssets = edges.filter(e => e.target === id).map(e => {
+  const incomingAssets = useMemo(() => edges.filter(e => e.target === id).map(e => {
     const srcNode = nodes.find(n => n.id === e.source);
     if (srcNode?.data?.asset) return { ...srcNode.data.asset, name: srcNode.data.name || srcNode.data.asset.prompt };
     const url = srcNode?.data?.resultUrl || srcNode?.data?.frameUrl || srcNode?.data?.videoUrl;
@@ -2076,7 +2073,7 @@ export const VideoClipNode = ({ id, data, selected }: any) => {
        return { url, _type: url.includes('.mp4') ? 'video' : 'image', prompt: srcNode.data.prompt || srcNode.data.videoPrompt, name: srcNode.data.name || '连线参考' };
     }
     return null;
-  }).filter(Boolean);
+  }).filter(Boolean), [edges, nodes, id]);
 
   const { enqueueTask } = useCanvasEngine();
 
@@ -2461,12 +2458,13 @@ export const VideoClipNode = ({ id, data, selected }: any) => {
     </div>
   );
 };
+export const VideoClipNode = React.memo(_VideoClipNode);
 // ==========================================
 // ==========================================
 // ==========================================
 // 2. 图像节点 (MediaNode) - 搭载创作者悬浮面板
 // ==========================================
-export const MediaNode = ({ id, data, selected }: any) => {
+const _MediaNode = ({ id, data, selected }: any) => {
   const { updateNodeData, getNodes, setNodes } = useReactFlow();
   const edges = useEdges();
   const { enqueueTask } = useCanvasEngine();
@@ -2483,7 +2481,7 @@ export const MediaNode = ({ id, data, selected }: any) => {
   const isReferenceOnly = !!data.asset;
   const displayImage = isReferenceOnly ? data.asset.url : data.resultUrl;
 
-  const incomingAssets = edges.filter(e => e.target === id).map(e => {
+  const incomingAssets = useMemo(() => edges.filter(e => e.target === id).map(e => {
     const srcNode = nodes.find(n => n.id === e.source);
     if (srcNode?.data?.asset) return { ...srcNode.data.asset, name: srcNode.data.name || srcNode.data.asset.prompt };
     const url = srcNode?.data?.resultUrl || srcNode?.data?.frameUrl || srcNode?.data?.videoUrl;
@@ -2491,16 +2489,11 @@ export const MediaNode = ({ id, data, selected }: any) => {
        return { url, _type: url.includes('.mp4') ? 'video' : 'image', prompt: srcNode.data.prompt || srcNode.data.videoPrompt, name: srcNode.data.name || '连线参考' };
     }
     return null;
-  }).filter(Boolean);
+  }).filter(Boolean), [edges, nodes, id]);
 
-  const ratioStyleMap: Record<string, React.CSSProperties> = {
-    '16:9': { width: '320px', aspectRatio: '16/9' }, '9:16': { width: '220px', aspectRatio: '9/16' },
-    '1:1': { width: '260px', aspectRatio: '1/1' }, '4:3': { width: '280px', aspectRatio: '4/3' }, '3:4': { width: '240px', aspectRatio: '3/4' }
-  };
-  // ★ 优先使用图片真实比例（来自资产表提取），否则回退预设比例表
   const currentStyle = data.customAspectRatio
     ? { width: `${data.customWidth || 320}px`, aspectRatio: String(data.customAspectRatio) }
-    : (ratioStyleMap[data.ratio || '16:9'] || ratioStyleMap['16:9']);
+    : (MEDIA_RATIO_MAP[data.ratio || '16:9'] || MEDIA_RATIO_MAP['16:9']);
 
   // 高清放大确认
   const handleHDConfirm = () => {
@@ -2925,11 +2918,12 @@ export const MediaNode = ({ id, data, selected }: any) => {
     </div>
   );
 };
+export const MediaNode = React.memo(_MediaNode);
 
 // ==========================================
 // 3. 视频生成节点 (RenderNode) - 搭载创作者悬浮面板
 // ==========================================
-export const RenderNode = ({ id, data, selected }: any) => {
+const _RenderNode = ({ id, data, selected }: any) => {
   const { updateNodeData } = useReactFlow();
   const edges = useEdges();
   const nodes = useNodes();
@@ -2938,19 +2932,14 @@ export const RenderNode = ({ id, data, selected }: any) => {
   const isReferenceOnly = !!data.asset;
   const displayVideo = isReferenceOnly ? data.asset.url : data.resultUrl;
 
-  const incomingAssets = edges.filter(e => e.target === id).map(e => {
+  const incomingAssets = useMemo(() => edges.filter(e => e.target === id).map(e => {
     const srcNode = nodes.find(n => n.id === e.source);
     if (srcNode?.data?.asset) return srcNode.data.asset;
     if (srcNode?.data?.resultUrl) return { url: srcNode.data.resultUrl, _type: 'video', prompt: srcNode.data.prompt };
     return null;
-  }).filter(Boolean);
+  }).filter(Boolean), [edges, nodes, id]);
 
-  // 核心修复：视频节点尺寸更大，使用内联样式彻底锁死比例
-  const ratioStyleMap: Record<string, React.CSSProperties> = { 
-    '16:9': { width: '400px', aspectRatio: '16/9' }, '9:16': { width: '260px', aspectRatio: '9/16' }, 
-    '1:1': { width: '320px', aspectRatio: '1/1' }, '4:3': { width: '380px', aspectRatio: '4/3' }, '3:4': { width: '320px', aspectRatio: '3/4' } 
-  };
-  const currentStyle = ratioStyleMap[data.ratio || '16:9'] || ratioStyleMap['16:9'];
+  const currentStyle = RENDER_RATIO_MAP[data.ratio || '16:9'] || RENDER_RATIO_MAP['16:9'];
 
   const handleRender = async () => {
     if (data.isGenerating) return;
@@ -3205,11 +3194,12 @@ export const RenderNode = ({ id, data, selected }: any) => {
     </div>
   );
 };
+export const RenderNode = React.memo(_RenderNode);
 
 // ==========================================
 // 4. 合成终点节点 (CombineNode)
 // ==========================================
-export const CombineNode = ({ data }: any) => {
+const _CombineNode = ({ data }: any) => {
   return (
     <div className="relative z-20 group">
       {/* ✨ 将触点放在外壳上 */}
@@ -3233,11 +3223,12 @@ export const CombineNode = ({ data }: any) => {
     </div>
   );
 };
+export const CombineNode = React.memo(_CombineNode);
 
 // ==========================================
 // 5. 全新路线：表格型分镜脚本节点 (ScriptTableNode)
 // ==========================================
-export const ScriptTableNode = ({ id, data, selected }: any) => {
+const _ScriptTableNode = ({ id, data, selected }: any) => {
   const { updateNodeData } = useReactFlow();
 
   const updateRow = (rowId: string, field: string, value: string) => {
@@ -3358,11 +3349,12 @@ export const ScriptTableNode = ({ id, data, selected }: any) => {
     </div>
   );
 };
+export const ScriptTableNode = React.memo(_ScriptTableNode);
 
 // ==========================================
 // 6. 全新路线：前置资产基建表格 (AssetTableNode) - 终极生图版
 // ==========================================
-export const AssetTableNode = ({ id, data, selected }: any) => {
+const _AssetTableNode = ({ id, data, selected }: any) => {
   const { updateNodeData, getNodes, setNodes } = useReactFlow();
   const type = data.assetType || 'scene'; 
   const [zenMode, setZenMode] = useState<any>(null); 
@@ -3733,12 +3725,14 @@ export const AssetTableNode = ({ id, data, selected }: any) => {
       </div>
     </div>
   );
-}; // 🚨 核心修复2：删掉多余的反大括号，正确闭合整个组件
+};
+export const AssetTableNode = React.memo(_AssetTableNode);
+// 🚨 核心修复2：删掉多余的反大括号，正确闭合整个组件
 
 // ==========================================
 // 6. 文本备注节点 (TextNode) —— 创作者随笔与脚本草稿
 // ==========================================
-export const TextNode = ({ id, data, selected }: any) => {
+const _TextNode = ({ id, data, selected }: any) => {
   const { updateNodeData } = useReactFlow();
 
   return (
@@ -3764,3 +3758,4 @@ export const TextNode = ({ id, data, selected }: any) => {
     </div>
   );
 };
+export const TextNode = React.memo(_TextNode);

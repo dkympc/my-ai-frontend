@@ -56,32 +56,59 @@ export default function CopilotPanel({ isOpen, onClose, copilot }: CopilotPanelP
   const [showSidebar, setShowSidebar] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const setToastMsg = useAppStore(s => s.setToastMsg);
 
-  // ★ 可拖动
-  const [pos, setPos] = useState({ x: 380, y: 80 }); // 默认位置
-  const [isDragging, setIsDragging] = useState(false);
-  const dragRef = useRef({ startX: 0, startY: 0, origX: 0, origY: 0 });
+  // ★ 高性能拖动：位置存 ref 避免 setState 导致每帧重渲染
+  // 画布上 backdrop-blur + React Flow 的 mousemove 处理是拖拽延迟的真正瓶颈
+  const posRef = useRef({ x: 380, y: 80 });
+  const dragRef = useRef({ startX: 0, startY: 0, origX: 0, origY: 0, active: false });
 
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    setIsDragging(true);
-    dragRef.current = { startX: e.clientX, startY: e.clientY, origX: pos.x, origY: pos.y };
-  }, [pos]);
+    e.stopPropagation();
+    dragRef.current = { startX: e.clientX, startY: e.clientY, origX: posRef.current.x, origY: posRef.current.y, active: true };
+    // 拖动期间：关闭 backdrop-blur（GPU 合成瓶颈）+ 阻断画布接收鼠标事件
+    if (panelRef.current) {
+      panelRef.current.style.backdropFilter = 'none';
+      panelRef.current.style.backgroundColor = 'rgba(8, 8, 10, 0.98)';
+    }
+    // 阻断 React Flow 画布在拖动期间处理任何鼠标事件
+    const pane = document.querySelector('.react-flow__pane') as HTMLElement;
+    if (pane) pane.style.pointerEvents = 'none';
+  }, []);
+
+  // 初始化面板 DOM 位置
+  useEffect(() => {
+    if (panelRef.current) {
+      panelRef.current.style.transform = `translate(${posRef.current.x}px, ${posRef.current.y}px)`;
+    }
+  }, []);
 
   useEffect(() => {
-    if (!isDragging) return;
     const handleMove = (e: MouseEvent) => {
-      setPos({
-        x: dragRef.current.origX + (e.clientX - dragRef.current.startX),
-        y: Math.max(0, dragRef.current.origY + (e.clientY - dragRef.current.startY)),
-      });
+      if (!dragRef.current.active) return;
+      const x = dragRef.current.origX + (e.clientX - dragRef.current.startX);
+      const y = Math.max(0, dragRef.current.origY + (e.clientY - dragRef.current.startY));
+      posRef.current = { x, y };
+      if (panelRef.current) {
+        panelRef.current.style.transform = `translate(${x}px, ${y}px)`;
+      }
     };
-    const handleUp = () => setIsDragging(false);
+    const handleUp = () => {
+      dragRef.current.active = false;
+      // 恢复 backdrop-blur + 背景 + 画布鼠标事件
+      if (panelRef.current) {
+        panelRef.current.style.backdropFilter = '';
+        panelRef.current.style.backgroundColor = '';
+      }
+      const pane = document.querySelector('.react-flow__pane') as HTMLElement;
+      if (pane) pane.style.pointerEvents = '';
+    };
     window.addEventListener('mousemove', handleMove);
     window.addEventListener('mouseup', handleUp);
     return () => { window.removeEventListener('mousemove', handleMove); window.removeEventListener('mouseup', handleUp); };
-  }, [isDragging]);
+  }, []);
 
   // 自动滚底
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
@@ -129,8 +156,9 @@ export default function CopilotPanel({ isOpen, onClose, copilot }: CopilotPanelP
 
   return createPortal(
     <div
-      className={`fixed z-[999998] rounded-[28px] bg-[#08080a]/95 backdrop-blur-3xl border border-white/[0.06] shadow-[0_40px_120px_rgba(0,0,0,0.98),inset_0_1px_1px_rgba(255,255,255,0.04)] flex overflow-hidden animate-in fade-in zoom-in-95 duration-300 ${isDragging ? 'cursor-grabbing select-none' : ''}`}
-      style={{ left: pos.x, top: pos.y, width: showSidebar ? 620 : 380, height: 'min(85vh, 700px)' }}
+      ref={panelRef}
+      className="fixed z-[999998] rounded-[28px] bg-[#08080a]/95 backdrop-blur-3xl border border-white/[0.06] shadow-[0_40px_120px_rgba(0,0,0,0.98),inset_0_1px_1px_rgba(255,255,255,0.04)] flex overflow-hidden animate-in fade-in zoom-in-95 duration-300"
+      style={{ left: 0, top: 0, width: showSidebar ? 620 : 380, height: 'min(85vh, 700px)', willChange: 'transform' }}
       onClick={e => e.stopPropagation()}
     >
       {/* ========== 左侧对话列表 ========== */}

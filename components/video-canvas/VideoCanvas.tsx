@@ -93,7 +93,20 @@ function ZoomPanel() {
 }
 
 function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
-  const { activeCanvasProjectId, setActiveCanvasProjectId, canvasProjects, updateCanvasProject, canvasSettings, setCanvasSettings, isFilmControlOpen, setIsFilmControlOpen, copilotIsOpen, setCopilotIsOpen, selectionAssistEnabled, setSelectionAssistEnabled, fissionProgress, abortFission } = useAppStore();
+  const activeCanvasProjectId = useAppStore((s: any) => s.activeCanvasProjectId);
+  const setActiveCanvasProjectId = useAppStore((s: any) => s.setActiveCanvasProjectId);
+  const canvasProjects = useAppStore((s: any) => s.canvasProjects);
+  const updateCanvasProject = useAppStore((s: any) => s.updateCanvasProject);
+  const canvasSettings = useAppStore((s: any) => s.canvasSettings);
+  const setCanvasSettings = useAppStore((s: any) => s.setCanvasSettings);
+  const isFilmControlOpen = useAppStore((s: any) => s.isFilmControlOpen);
+  const setIsFilmControlOpen = useAppStore((s: any) => s.setIsFilmControlOpen);
+  const copilotIsOpen = useAppStore((s: any) => s.copilotIsOpen);
+  const setCopilotIsOpen = useAppStore((s: any) => s.setCopilotIsOpen);
+  const selectionAssistEnabled = useAppStore((s: any) => s.selectionAssistEnabled);
+  const setSelectionAssistEnabled = useAppStore((s: any) => s.setSelectionAssistEnabled);
+  const fissionProgress = useAppStore((s: any) => s.fissionProgress);
+  const abortFission = useAppStore((s: any) => s.abortFission);
   const currentProject = (canvasProjects || []).find((p: any) => p.id === activeCanvasProjectId);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(currentProject?.nodes || []);
@@ -113,6 +126,18 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
 
   const { screenToFlowPosition, getNodes, getEdges } = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement>(null);
+  
+  // ★ 性能优化：用 ref 持有最新 nodes/edges，避免 customOnNodesChange 因依赖变化而重建
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+  const edgesRef = useRef(edges);
+  edgesRef.current = edges;
+
+  // ★ 性能优化：连线视觉指纹缓存——仅当节点选中/生成/脏数据/书签状态变化时重算连线样式，跳过纯拖拽位置更新
+  const lastEdgeVisualHashRef = useRef<string>('');
+  const getNodesVisualHash = useCallback((ns: any[]) => {
+    return ns.map(n => `${n.id}|${n.selected}|${n.data?.isGenerating}|${n.data?.isDirty}|${n.data?.activeTargetIds?.join(',')}`).join('__');
+  }, []);
   
   // ✨ 修改 menuPos 支持记录“来源节点”，用来自动连线
   const [menuPos, setMenuPos] = useState<{ x: number, y: number, screenX: number, screenY: number, sourceNodeId?: string } | null>(null);
@@ -189,22 +214,20 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
 
   // ✨【中控容灾】自定义节点变更拦截器 (拦截误删 + 时空软删除)
   const customOnNodesChange = useCallback((changes: any[]) => {
+    const currentNodes = nodesRef.current;
+    const currentEdges = edgesRef.current;
     const removeChanges = changes.filter(c => c.type === 'remove');
     if (removeChanges.length > 0) {
       const hasCriticalNode = removeChanges.some(change => {
-        const nodeToDelete = nodes.find(n => n.id === change.id);
+        const nodeToDelete = currentNodes.find(n => n.id === change.id);
         return nodeToDelete && (nodeToDelete.type === 'masterScript' || nodeToDelete.type === 'assetTable');
       });
       
       if (hasCriticalNode) {
-        // ★ 异步弹窗（保持回调签名同步）
-        // 弹窗期间画布被遮罩锁定，nodes/edges/onNodesChange 不会变化
-        const capturedNodes = nodes;
-        const capturedEdges = edges;
-        const capturedOnNodesChange = onNodesChange;
+        const capturedNodes = currentNodes;
+        const capturedEdges = currentEdges;
         showConfirm("⚠️ 主中控/资产表为分镜核心", "您确定要删除吗?", "danger").then((confirmed) => {
           if (!confirmed) return;
-          // 用户确认后才执行删除 + 时空回收站捕获
           const newDeletedRecords: any[] = [];
           removeChanges.forEach(change => {
             const nodeToDelete = capturedNodes.find(n => n.id === change.id);
@@ -222,17 +245,16 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
             setDeletedNodes(prev => [...newDeletedRecords, ...prev]);
             setDeleteHistory(prev => [...prev, { nodes: capturedNodes, edges: capturedEdges }]);
           }
-          capturedOnNodesChange(changes);
+          onNodesChange(changes);
         });
-        return; // 异步路径，不同步处理
+        return;
       }
       
-      // 非关键节点：同步捕获进时空回收站
       const newDeletedRecords: any[] = [];
       removeChanges.forEach(change => {
-        const nodeToDelete = nodes.find(n => n.id === change.id);
+        const nodeToDelete = currentNodes.find(n => n.id === change.id);
         if (nodeToDelete) {
-          const connectedEdges = edges.filter(e => e.source === nodeToDelete.id || e.target === nodeToDelete.id);
+          const connectedEdges = currentEdges.filter(e => e.source === nodeToDelete.id || e.target === nodeToDelete.id);
           newDeletedRecords.push({
             id: nodeToDelete.id,
             node: nodeToDelete,
@@ -244,12 +266,12 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
       
       if (newDeletedRecords.length > 0) {
         setDeletedNodes(prev => [...newDeletedRecords, ...prev]);
-        setDeleteHistory(prev => [...prev, { nodes, edges }]);
+        setDeleteHistory(prev => [...prev, { nodes: currentNodes, edges: currentEdges }]);
       }
     }
     
     onNodesChange(changes);
-  }, [nodes, edges, onNodesChange]);
+  }, [onNodesChange]);
 
   // ✨【中控容灾】从时空裂隙中完美恢复节点与其物理连线和各种状态
   const handleRestoreNode = useCallback((recordId: string) => {
@@ -416,11 +438,15 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
           setUndoHistory(prev => [...prev.slice(-49), { nodes: JSON.parse(JSON.stringify(currentNodes)), edges: JSON.parse(JSON.stringify(currentEdges)) }]);
         }
         undoThrottleRef.current = null;
-      }, 1500);
+      }, 5000);
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [nodes, edges]);
 
+    // ★ 连线样式重算：仅当节点视觉属性（选中/生成/脏数据/书签）变化时才执行，跳过纯拖拽位置更新
     useEffect(() => {
+      const currentHash = getNodesVisualHash(nodes);
+      if (currentHash === lastEdgeVisualHashRef.current) return; // 拖拽位置变化，跳过
+      lastEdgeVisualHashRef.current = currentHash;
       setEdges((eds) => {
         let changed = false;
         const newEdges = eds.map((edge) => {
@@ -495,7 +521,7 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
         });
         return changed ? newEdges : eds; 
       });
-    }, [nodes, setEdges]);
+    }, [nodes, setEdges, getNodesVisualHash]);
 
   // 👈 彻底删除了 handleGlobalCombine 及其所有残余代码
 
@@ -1437,13 +1463,12 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
 
         {/* 悬浮圆形气泡按钮 */}
         <button 
-          onClick={() => setIsRecyclerOpen(!isRecyclerOpen)}
+          onClick={(e) => { e.stopPropagation(); setIsRecyclerOpen(!isRecyclerOpen); }}
           className={`w-10 h-10 rounded-full backdrop-blur-3xl border shadow-[0_10px_30px_rgba(0,0,0,0.8)] flex items-center justify-center transition-all duration-300 relative group/btn hover:scale-105 active:scale-95 ${
             isRecyclerOpen 
               ? 'bg-white/20 border-white/30 text-white' 
               : 'bg-black/60 border-white/[0.08] text-zinc-400 hover:text-white hover:border-white/20'
           }`}
-          onClickCapture={e => e.stopPropagation()}
         >
           <RotateCcw size={16} className={`transition-transform duration-500 ${isRecyclerOpen ? 'rotate-180' : 'group-hover/btn:rotate-45'}`} />
           {/* 未读数字标记 */}

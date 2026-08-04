@@ -65,12 +65,17 @@ export const useAppStore = create<AppState>()(
           updatedProjects = [...(state.canvasProjects || []), { id, ...mergeData, updatedAt: Date.now() }];
         }
         // ★ P0 存储加固：每次画布数据变更后，异步写入 localStorage 全量备份（防刷新/换浏览器丢失）
-        // 使用 setTimeout 0 延迟，避免阻塞 Zustand set 的同步路径
+        // 使用 requestIdleCallback 推迟到浏览器空闲时执行，避免阻塞拖拽动画帧
         const projectForBackup = updatedProjects.find((p: any) => p.id === id);
         if (projectForBackup) {
-          setTimeout(() => {
+          const doBackup = () => {
             try { localStorage.setItem('yr-canvas-full-backup', JSON.stringify(projectForBackup)); } catch(e) {}
-          }, 0);
+          };
+          if (typeof requestIdleCallback !== 'undefined') {
+            requestIdleCallback(doBackup, { timeout: 3000 });
+          } else {
+            setTimeout(doBackup, 0);
+          }
         }
         return { canvasProjects: updatedProjects };
       }),
