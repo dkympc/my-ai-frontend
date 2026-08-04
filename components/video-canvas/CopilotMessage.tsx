@@ -23,26 +23,26 @@ export default function CopilotMessageBubble({ message }: CopilotMessageProps) {
       {/* 头像图标 */}
       <div className={`w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center mt-0.5 ${
         isUser 
-          ? 'bg-indigo-500/20 border border-indigo-500/30' 
-          : 'bg-emerald-500/20 border border-emerald-500/30'
+          ? 'bg-white/[0.08] border border-white/[0.1]' 
+          : 'bg-white/[0.04] border border-white/[0.06]'
       }`}>
         {isUser 
-          ? <User size={13} className="text-indigo-400" />
-          : <Sparkles size={13} className="text-emerald-400" />
+          ? <User size={13} className="text-zinc-300" />
+          : <Sparkles size={13} className="text-zinc-400" />
         }
       </div>
 
       {/* 消息气泡 */}
       <div className={`max-w-[85%] px-3.5 py-2.5 rounded-2xl text-[12px] leading-relaxed whitespace-pre-wrap break-words ${
         isUser
-          ? 'bg-indigo-500/15 border border-indigo-500/20 text-zinc-200 rounded-tr-md'
+          ? 'bg-white/[0.08] border border-white/[0.1] text-white rounded-tr-md'
           : 'bg-white/[0.04] border border-white/[0.06] text-zinc-300 rounded-tl-md'
       }`}>
         {/* 流式输出中：显示文字 + 闪烁光标 */}
         {message.isStreaming ? (
           <span>
             {message.content || '思考中...'}
-            <span className="inline-block w-1.5 h-4 bg-emerald-400 ml-0.5 animate-pulse align-middle" />
+            <span className="inline-block w-1.5 h-4 bg-zinc-400 ml-0.5 animate-pulse align-middle" />
           </span>
         ) : (
           message.content || (

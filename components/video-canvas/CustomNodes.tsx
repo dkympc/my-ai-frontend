@@ -68,46 +68,79 @@ const forceDownload = async (url: string, filename: string) => {
 // ★★★ SSE 流式聊天辅助函数 — 解决 stream:false 导致完整缓冲等待、用户感觉"卡死"的问题
 // 原理：用 SSE 逐 chunk 读取，同时通过 onChunk 回调实时展示生成进度
 // 改动：统一走 fetchApi，享受 401/402/403 全局拦截 + API_BASE 前缀 + 统一 Auth
-const fetchStreamingChat = async (payload: any, onChunk?: (text: string) => void): Promise<string> => {
-  const response = await fetchApi('/v1/chat/completions', {
-    method: 'POST',
-    body: JSON.stringify({ ...payload, _source: 'canvas', stream: true }),
-  });
-  if (!response.ok) {
-    const errText = await response.text().catch(() => '');
-    throw new Error(`HTTP ${response.status}: ${errText}`);
-  }
+// ★ 新增 AbortSignal 支持 + 5 分钟超时兜底，防止 SSE 流挂起导致按钮永久转圈
+const fetchStreamingChat = async (payload: any, onChunk?: (text: string) => void, signal?: AbortSignal): Promise<string> => {
+  // ★ 超时 AbortController：8 分钟兜底，防止 SSE 流永久挂起（分镜裂变 Prompt 较长，需要更宽松的超时）
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), 8 * 60 * 1000);
 
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error('[Stream Error] 无法读取响应流');
+  // ★ 合并外部 signal 和超时 signal：任一触发即 abort
+  const combinedSignal = signal
+    ? combineAbortSignals(signal, timeoutController.signal)
+    : timeoutController.signal;
 
-  const decoder = new TextDecoder();
-  let fullText = '';
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || !trimmed.startsWith('data:')) continue;
-      const jsonStr = trimmed.slice(5).trim();
-      if (jsonStr === '[DONE]') continue;
-      try {
-        const parsed = JSON.parse(jsonStr);
-        const content = parsed.choices?.[0]?.delta?.content || '';
-        if (content) {
-          fullText += content;
-          if (onChunk) onChunk(fullText);
-        }
-      } catch { /* 忽略解析失败的行 */ }
+  try {
+    const fetchOptions: any = {
+      method: 'POST',
+      body: JSON.stringify({ ...payload, _source: 'canvas', stream: true }),
+    };
+    if (combinedSignal) {
+      fetchOptions.signal = combinedSignal;
     }
-  }
 
-  return fullText;
+    const response = await fetchApi('/v1/chat/completions', fetchOptions);
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      throw new Error(`HTTP ${response.status}: ${errText}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('[Stream Error] 无法读取响应流');
+
+    const decoder = new TextDecoder();
+    let fullText = '';
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data:')) continue;
+        const jsonStr = trimmed.slice(5).trim();
+        if (jsonStr === '[DONE]') continue;
+        try {
+          const parsed = JSON.parse(jsonStr);
+          const content = parsed.choices?.[0]?.delta?.content || '';
+          if (content) {
+            fullText += content;
+            if (onChunk) onChunk(fullText);
+          }
+        } catch { /* 忽略解析失败的行 */ }
+      }
+    }
+
+    return fullText;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+// ★ 辅助：合并多个 AbortSignal
+const combineAbortSignals = (...signals: AbortSignal[]): AbortSignal => {
+  const controller = new AbortController();
+  const onAbort = () => {
+    controller.abort();
+    signals.forEach(s => s.removeEventListener('abort', onAbort));
+  };
+  signals.forEach(s => {
+    if (s.aborted) { controller.abort(); return; }
+    s.addEventListener('abort', onAbort);
+  });
+  return controller.signal;
 };
 
 // ✨ 高级黑玻璃禅定编辑器 (Zen Mode)
@@ -371,18 +404,37 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
       if (!data.text) useAppStore.getState().setToastMsg("请先在上方输入剧本！");
       return;
     }
+    // ★ 防止与其他进度条冲突
+    if (useAppStore.getState().fissionProgress.status !== 'idle') {
+      useAppStore.getState().setToastMsg("⚠️ 请等待当前操作完成后再提取摄影机参数");
+      return;
+    }
     updateNodeData(id, { isExtractingCamera: true });
-    useAppStore.getState().setToastMsg("正在通读全剧本，锁定电影级全局机位...");
+    
+    // ★ AbortController + 统一进度条
+    const abortController = new AbortController();
+    useAppStore.getState().setAbortFission(() => {
+      abortController.abort();
+      useAppStore.getState().setToastMsg("⏹️ 已中止摄影机提取");
+    });
+    let phaseInterval: NodeJS.Timeout | undefined;
     
     try {
       const targetModel = resolveLLMModel(data);
-      
-      // ✨ 痛点 1 修复：获取当前画布全局画风设置
       const globalStyle = useAppStore.getState().canvasSettings?.globalPromptSuffix || "无特定风格";
+
+      // ★ 启动进度条
+      useAppStore.getState().setFissionProgress({ status: 'camera', phase: '参数生成中.' });
+      const phaseTexts = ['参数生成中.', '参数生成中..', '参数生成中...'];
+      let ticker = 0;
+      phaseInterval = setInterval(() => {
+        ticker = (ticker + 1) % phaseTexts.length;
+        useAppStore.getState().setFissionProgress({ status: 'camera', phase: phaseTexts[ticker] });
+      }, 800);
 
       const payload = {
         model: targetModel,
-        max_tokens: 4096, // ★ 摄影机参数输出只有一句话，4096 足够
+        max_tokens: 4096,
         messages: [
           {
             role: "system",
@@ -412,19 +464,22 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
         ]
       };
 
-      // ★ 改为流式请求：用户实时看到生成进度，不再干等转圈
-      const cameraParams = (await fetchStreamingChat(payload, (text) => {
-        const preview = text.length > 50 ? '...' + text.slice(-50) : text;
-        useAppStore.getState().setToastMsg(`📷 摄影机参数生成中... ${preview}`);
-      })).trim() || "Shot on 35mm lens, cinematic lighting, 8k resolution";
+      // ★ 流式请求：不再用 Toast 蹦代码，统一走进度条
+      const cameraParams = (await fetchStreamingChat(payload, undefined, abortController.signal)).trim() || "Shot on 35mm lens, cinematic lighting, 8k resolution";
       
       updateNodeData(id, { globalCamera: cameraParams, model: targetModel });
+      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' });
       useAppStore.getState().setToastMsg(`✅ 全局摄影机 & 调性已锁定！`);
     } catch (error: any) {
       console.error("提取摄影机失败:", error);
-      useAppStore.getState().setToastMsg(`摄影机锁定失败: ${error.message || '请检查模型或网络'}`);
+      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' });
+      if (error?.name !== 'AbortError') {
+        useAppStore.getState().setToastMsg(`摄影机锁定失败: ${error.message || '请检查模型或网络'}`);
+      }
     } finally {
-      // 🔥 无论成功失败，确保关闭转圈
+      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' });
+      useAppStore.getState().setAbortFission(null);
+      if (phaseInterval) clearInterval(phaseInterval);
       updateNodeData(id, { isExtractingCamera: false });
     }
   };
@@ -470,7 +525,29 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
   // 阶段②：实际资产提取逻辑（由 handleEpisodeConfirm 调用，完整保留原有提取+建节点流程）
   const executeAssetExtraction = async (type: 'scene' | 'character' | 'prop', episodeResult: { episodes: any[], text: string }) => {
     const typeLabel = type === 'scene' ? '场景' : type === 'character' ? '角色' : '道具';
-    useAppStore.getState().setToastMsg(`正在提取选中段落的${typeLabel}数据...`);
+    
+    // ★ 防止与其他进度条冲突
+    if (useAppStore.getState().fissionProgress.status !== 'idle') {
+      useAppStore.getState().setToastMsg("⚠️ 请等待当前操作完成后再提取资产");
+      return;
+    }
+
+    // ★ AbortController + 统一进度条
+    const abortController = new AbortController();
+    useAppStore.getState().setAbortFission(() => {
+      abortController.abort();
+      useAppStore.getState().setToastMsg("⏹️ 已中止资产提取");
+    });
+    let phaseInterval: NodeJS.Timeout | undefined;
+
+    // ★ 启动进度条
+    useAppStore.getState().setFissionProgress({ status: 'asset', phase: `${typeLabel}提取中.` });
+    const phaseTexts = [`${typeLabel}提取中.`, `${typeLabel}提取中..`, `${typeLabel}提取中...`];
+    let ticker = 0;
+    phaseInterval = setInterval(() => {
+      ticker = (ticker + 1) % phaseTexts.length;
+      useAppStore.getState().setFissionProgress({ status: 'asset', phase: phaseTexts[ticker] });
+    }, 800);
 
     try {
       const targetModel = resolveLLMModel(data);
@@ -528,11 +605,8 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
         ]
       };
 
-      // ★ 流式请求：资产表提取实时展示进度
-      const rawContent = await fetchStreamingChat(payload, (text) => {
-        const preview = text.length > 60 ? '...' + text.slice(-60) : text;
-        useAppStore.getState().setToastMsg(`📋 ${typeLabel}数据提取中... ${preview}`);
-      });
+      // ★ 流式请求：不再用 Toast 蹦代码，统一走进度条
+      const rawContent = await fetchStreamingChat(payload, undefined, abortController.signal);
 
       let cleanJson = rawContent;
       const match = rawContent.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
@@ -569,12 +643,19 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
 
       setNodes((nds) => [...nds, newTableNode]);
       setEdges((eds) => [...eds, newEdge]);
+      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' });
       useAppStore.getState().setToastMsg(`✅ ${typeLabel}数据表生成成功！共${finalRows.length}条`);
 
     } catch (error: any) {
       console.error("[Asset Extract Error]", error);
-      useAppStore.getState().setToastMsg(`数据表生成失败: ${error.message}`);
+      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' });
+      if (error?.name !== 'AbortError') {
+        useAppStore.getState().setToastMsg(`数据表生成失败: ${error.message}`);
+      }
     } finally {
+      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' });
+      useAppStore.getState().setAbortFission(null);
+      if (phaseInterval) clearInterval(phaseInterval);
       setExtractingAsset(null);
     }
   };
@@ -621,10 +702,80 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
     return lines.join('\n');
   };
 
+  // ★★★ 长剧本智能预摘要：超过 10000 字时，先做一次轻量 LLM 调用提取结构化摘要
+  // 后续裂变只传摘要，不传全文，避免超长剧本（几十万字）导致 API 请求体过大
+  const preSummarizeScript = async (fullScript: string, model: string): Promise<string> => {
+    // 如果已有缓存摘要，直接返回
+    if (data.scriptSummary) return data.scriptSummary;
+    // 如果剧本不太长，无需摘要
+    if (fullScript.length <= 10000) return fullScript;
+
+    // 做一次轻量 LLM 调用，提取关键上下文
+    const summaryPayload = {
+      model,
+      messages: [
+        {
+          role: "system",
+          content: `你是一名剧本分析师。请用简洁的中文提取以下剧本的关键信息，生成结构化摘要。
+输出格式（每项一句话，不要超过 800 字总计）：
+
+【人物关系】：列出主要角色及其之间的关系（如师徒、对手、恋人等）
+【空间场景】：列出剧本中出现的主要地点/场景
+【时间线】：按顺序简述关键事件节点
+【视觉要素】：列出对画面风格有影响的关键设定（如时代背景、季节、天气、光影氛围）
+
+要求：
+- 每项一到两句话，不展开细节
+- 重点关注对后续分镜画面有影响的信息
+- 忽略对白细节，只提取人物关系与空间变化`
+        },
+        {
+          role: "user",
+          content: `请分析以下剧本，输出结构化摘要：\n\n${fullScript}`
+        }
+      ]
+    };
+
+    try {
+      // ★ 使用非流式请求（stream: false），快速获取摘要结果
+      const summaryRaw = await fetchStreamingChat(summaryPayload, undefined, abortController.signal);
+      if (!summaryRaw || summaryRaw.length < 50) {
+        // LLM 返回异常，回退到截断全文（取首尾各 4000 字）
+        const head = fullScript.substring(0, 4000);
+        const tail = fullScript.substring(Math.max(0, fullScript.length - 4000));
+        return `【剧本首部】\n${head}\n\n...(中间省略约${Math.floor((fullScript.length - 8000) / 1000)}千字)...\n\n【剧本尾部】\n${tail}`;
+      }
+      // 缓存摘要到节点数据，下次裂变直接复用
+      updateNodeData(id, { scriptSummary: summaryRaw });
+      return summaryRaw;
+    } catch {
+      // 网络错误等，回退到截断全文
+      const head = fullScript.substring(0, 4000);
+      const tail = fullScript.substring(Math.max(0, fullScript.length - 4000));
+      return `【剧本首部】\n${head}\n\n...(中间省略约${Math.floor((fullScript.length - 8000) / 1000)}千字)...\n\n【剧本尾部】\n${tail}`;
+    }
+  };
+
 
   const handleFissionShots = async () => {
+    // ★ 防止重复点击：正在裂变时禁止再次触发
     if (data.isGenerating || !selectedText) return;
+    if (useAppStore.getState().fissionProgress.status !== 'idle') {
+      useAppStore.getState().setToastMsg("⚠️ 分镜裂变正在进行中，请等待完成或点击中止");
+      return;
+    }
     updateNodeData(id, { isGenerating: true });
+
+    // ★ 创建 AbortController：支持用户手动中止 + 5 分钟超时兜底
+    const abortController = new AbortController();
+    useAppStore.getState().setAbortFission(() => {
+      abortController.abort();
+      useAppStore.getState().setToastMsg("⏹️ 已中止分镜裂变");
+    });
+
+    // ★ 阶段动画定时器引用（声明在 try 外，finally 中可清理）
+    let phase1Interval: NodeJS.Timeout | undefined;
+    let phase2Interval: NodeJS.Timeout | undefined;
     
     try {
       const targetModel = resolveLLMModel(data);
@@ -661,10 +812,18 @@ export const MasterScriptNode = ({ id, data, selected }: any) => {
         ? DirectorRouter.resolve(canvasSettings.directorGenre, canvasSettings.directorTempo || undefined)
         : null;
 
+      // ★ 长剧本预摘要：超过 10000 字时，先用一次轻量 LLM 调用提取故事脉络
+      // 摘要缓存到 data.scriptSummary，后续裂变直接复用
+      if (data.text && data.text.length > 10000 && !data.scriptSummary) {
+        useAppStore.getState().setFissionProgress({ status: 'stage1', phase: '剧本摘要生成中...' });
+        await preSummarizeScript(data.text, targetModel);
+      }
+
       // ==========================================
       // 🚀 工业级管道 1: 视频分镜拆解 (100% 满血还原，绝不删减)
       // ==========================================
-      useAppStore.getState().setToastMsg("阶段 1/2：正在执行工业级分镜拆解 (运镜与时序推断)...");
+      // ★ 用顶部进度条替代 Toast 显示 LLM 原始输出
+      useAppStore.getState().setFissionProgress({ status: 'stage1', phase: '分镜拆解中...' });
       const payloadStage1 = {
         model: targetModel,
         messages: [
@@ -765,16 +924,32 @@ ${directorCtx?.llmContextBlock || ''}`
           },
           { 
             role: "user", 
-            content: `【完整剧本上下文（仅供理解故事脉络，不参与本次拆解）】：\n${data.text}\n\n【已拆解分镜摘要（供延续空间站位与时序逻辑）】：\n${existingShotsSummary}\n\n${dictText}\n\n【照抄用的英文全局摄影参数】：\n${data.globalCamera}\n\n【★ 本次需拆解的分镜剧本选段】：\n${selectedText}`
+            // ★ 长剧本智能压缩：有摘要用摘要，无摘要用截断（首尾各 4000 字），短剧本直接用全文
+            content: (() => {
+              let scriptContext = data.text;
+              if (data.text.length > 10000) {
+                if (data.scriptSummary) {
+                  scriptContext = data.scriptSummary; // 优先使用 LLM 预摘要
+                } else {
+                  // 兜底：截断取首尾各 4000 字
+                  scriptContext = `【剧本首部】\n${data.text.substring(0, 4000)}\n\n...(中间省略约${Math.floor((data.text.length - 8000) / 1000)}千字)...\n\n【剧本尾部】\n${data.text.substring(Math.max(0, data.text.length - 4000))}`;
+                }
+              }
+              return `【剧本上下文（用于理解故事脉络，不参与本次拆解）】：\n${scriptContext}\n\n【已拆解分镜摘要（供延续空间站位与时序逻辑）】：\n${existingShotsSummary}\n\n${dictText}\n\n【照抄用的英文全局摄影参数】：\n${data.globalCamera}\n\n【★ 本次需拆解的分镜剧本选段】：\n${selectedText}`;
+            })()
           }
         ]
       };
 
-      // ★ 改为流式请求：分镜裂变运行时实时展示 LLM 思考过程
-      const raw1 = await fetchStreamingChat(payloadStage1, (text) => {
-        const preview = text.length > 80 ? '...' + text.slice(-80) : text;
-        useAppStore.getState().setToastMsg(`🧩 阶段 1/2 分镜拆解中... ${preview}`);
-      });
+      // ★ 流式请求：不再将 LLM 原始输出灌入 Toast，仅用顶部进度条闪烁反馈
+      let phase1Ticker = 0;
+      const phase1Texts = ['分镜拆解中.', '分镜拆解中..', '分镜拆解中...'];
+      phase1Interval = setInterval(() => {
+        phase1Ticker = (phase1Ticker + 1) % phase1Texts.length;
+        useAppStore.getState().setFissionProgress({ status: 'stage1', phase: phase1Texts[phase1Ticker] });
+      }, 800);
+      const raw1 = await fetchStreamingChat(payloadStage1, undefined, abortController.signal);
+      clearInterval(phase1Interval);
       if (!raw1) throw new Error("阶段1：LLM未返回有效内容");
       let cleanJson1 = raw1;
       const match1 = raw1.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
@@ -792,7 +967,8 @@ ${directorCtx?.llmContextBlock || ''}`
       // ==========================================
       // 🚀 工业级管道 2: 首帧静帧提取 (融合《依然拆帧》+《六大铁律》)
       // ==========================================
-      useAppStore.getState().setToastMsg("阶段 2/2：正在提炼顶级生图咒语 (光影注入与空间锚定)...");
+      // ★ 切换顶部进度条到阶段 2
+      useAppStore.getState().setFissionProgress({ status: 'stage2', phase: '首帧提取中...' });
       const payloadStage2 = {
         model: targetModel,
         messages: [
@@ -850,11 +1026,15 @@ ${directorCtx?.llmContextBlock || ''}`
         ]
       };
 
-      // ★ 改为流式请求：首帧提取实时展示进度
-      const raw2 = await fetchStreamingChat(payloadStage2, (text) => {
-        const preview = text.length > 80 ? '...' + text.slice(-80) : text;
-        useAppStore.getState().setToastMsg(`🎨 阶段 2/2 首帧提取中... ${preview}`);
-      });
+      // ★ 流式请求：不再将 LLM 原始输出灌入 Toast，仅用顶部进度条闪烁反馈
+      let phase2Ticker = 0;
+      const phase2Texts = ['首帧提取中.', '首帧提取中..', '首帧提取中...'];
+      phase2Interval = setInterval(() => {
+        phase2Ticker = (phase2Ticker + 1) % phase2Texts.length;
+        useAppStore.getState().setFissionProgress({ status: 'stage2', phase: phase2Texts[phase2Ticker] });
+      }, 800);
+      const raw2 = await fetchStreamingChat(payloadStage2, undefined, abortController.signal);
+      clearInterval(phase2Interval);
       if (!raw2) throw new Error("阶段2：LLM未返回有效内容");
       let cleanJson2 = raw2;
       const match2 = raw2.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
@@ -998,43 +1178,111 @@ ${directorCtx?.llmContextBlock || ''}`
       setShowBookmarks(true);
       updateNodeData(id, { sceneInterceptState: 'idle', extractedScenes: updatedExtractedScenes });
       setSelectedText(""); 
+      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' }); // ★ 重置进度条
       useAppStore.getState().setToastMsg(`✅ 裂变成功！已生成 ${fissionResult.shots.length} 个分镜卡片。`);
 
     } catch (error: any) {
       console.error("裂变解析错误:", error);
-      useAppStore.getState().setToastMsg(`裂变失败: ${error.message || '模型返回数据异常'}`);
+      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' }); // ★ 重置进度条
+      // ★ AbortError 是用户主动中止，不报错；其他错误正常显示 Toast
+      if (error?.name !== 'AbortError') {
+        useAppStore.getState().setToastMsg(`裂变失败: ${error.message || '模型返回数据异常'}`);
+      }
     } finally {
       // 🔥 最终关闭转圈状态
+      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' }); // ★ 兜底重置进度条
+      useAppStore.getState().setAbortFission(null); // ★ 清除中止函数
+      // ★ 清理 phase interval（防御性：如果在 setInterval 之后、clearInterval 之前抛异常）
+      try { if (typeof phase1Interval !== 'undefined') clearInterval(phase1Interval); } catch {}
+      try { if (typeof phase2Interval !== 'undefined') clearInterval(phase2Interval); } catch {}
       updateNodeData(id, { isGenerating: false });
     }
   };
         
 
-  const handleFissionTable = () => {
-    if (data.isGenerating) return;
+  const handleFissionTable = async () => {
+    if (data.isGenerating || !selectedText) return;
+    // ★ 防止与其他进度条冲突
+    if (useAppStore.getState().fissionProgress.status !== 'idle') {
+      useAppStore.getState().setToastMsg("⚠️ 请等待当前操作完成后再生成表格");
+      return;
+    }
     updateNodeData(id, { isGenerating: true });
-    useAppStore.getState().setToastMsg(`场记板已确认，正在生成全局表格视图...`);
 
-    setTimeout(() => {
+    // ★ AbortController + 统一进度条
+    const abortController = new AbortController();
+    useAppStore.getState().setAbortFission(() => {
+      abortController.abort();
+      useAppStore.getState().setToastMsg("⏹️ 已中止表格生成");
+    });
+    let phaseInterval: NodeJS.Timeout | undefined;
+
+    // ★ 启动进度条
+    useAppStore.getState().setFissionProgress({ status: 'table', phase: '表格生成中.' });
+    const phaseTexts = ['表格生成中.', '表格生成中..', '表格生成中...'];
+    let ticker = 0;
+    phaseInterval = setInterval(() => {
+      ticker = (ticker + 1) % phaseTexts.length;
+      useAppStore.getState().setFissionProgress({ status: 'table', phase: phaseTexts[ticker] });
+    }, 800);
+
+    try {
+      const targetModel = resolveLLMModel(data);
+
+      const payload = {
+        model: targetModel,
+        messages: [
+          {
+            role: "system",
+            content: `你是一名专业场记。请根据剧本选段，生成结构化的分镜场记表 JSON。
+要求返回 JSON 数组，每个分镜一行，字段如下（全部必填）：
+[{"shotNumber": "镜号(如01)", "duration": "时长(如8s)", "camera": "摄影机运动(如static/push/dolly)", "movement": "运镜方式(如nodal pan/steadicam)", "shotType": "景别(如中景/特写/全景)", "videoDesc": "视频动作描述(纯中文，描述画面动作)", "characters": "出场角色(如@张三 @李四)", "audio": "音效设计(如环境音/对白概要)", "imgScene": "图片场景(室内/室外/具体地点)", "imgShotType": "图片景别(如中景)", "imgDesc": "图片画面描述(纯中文，静态构图)", "imgCharacters": "图片出场角色", "imgEmotion": "情绪基调(如平静/紧张/悲伤)", "imgPrompt": "生图提示词(纯中文，综合上述信息生成可用于AI生图的描述)"}]
+
+【输出铁律】：
+- 只输出纯 JSON 数组，不要任何其他文字
+- 每个分镜的 imgPrompt 必须完整融合 imgScene + imgShotType + imgDesc + imgCharacters + imgEmotion`
+          },
+          {
+            role: "user",
+            content: `剧本选段：\n${selectedText}\n\n全局摄影参数（照抄注入生图提示词）：\n${data.globalCamera || '无'}\n\n请生成场记表 JSON。`
+          }
+        ]
+      };
+
+      const rawContent = await fetchStreamingChat(payload, undefined, abortController.signal);
+      let cleanJson = rawContent;
+      const match = rawContent.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+      if (match) cleanJson = match[1];
+      const parsedRows = JSON.parse(cleanJson.trim());
+
+      if (!Array.isArray(parsedRows) || parsedRows.length === 0) {
+        throw new Error("LLM 返回了空的表格数据");
+      }
+
+      // ✨ 注入全局摄影参数到每行的 imgPrompt
+      const cameraSuffix = data.globalCamera ? `, ${data.globalCamera}` : '';
+      const finalRows = parsedRows.map((row: any, idx: number) => ({
+        ...row,
+        id: `row_${Date.now()}_${idx}`,
+        shotNumber: row.shotNumber || String(idx + 1).padStart(2, '0'),
+        imgPrompt: (row.imgPrompt || row.imgDesc || '') + cameraSuffix,
+      }));
+
       const thisNode = getNodes().find(n => n.id === id);
       const baseX = thisNode ? thisNode.position.x : 0;
       const baseY = thisNode ? thisNode.position.y : 0;
       const existingTablesCount = getNodes().filter(n => n.type === 'scriptTable').length;
-      const targetY = baseY + (existingTablesCount * 600); 
 
       const tableId = `table_${Date.now()}`;
-      
       const newTable = {
-        id: tableId, type: 'scriptTable', 
-        position: { x: baseX + 650, y: targetY },
-        data: { 
-          scriptText: selectedText, 
-          globalCamera: data.globalCamera, 
+        id: tableId, type: 'scriptTable',
+        position: { x: baseX + 650, y: baseY + (existingTablesCount * 600) },
+        data: {
+          scriptText: selectedText,
+          globalCamera: data.globalCamera,
           sceneLighting: data.tempSceneLighting,
           status: 'draft',
-          rows: [
-            { id: `row_${Date.now()}`, shotNumber: '01', duration: '8s', camera: 'static', movement: 'nodal pan', shotType: '中景', videoDesc: '人物动作连贯延展...', characters: '@角色', audio: '环境音', imgScene: '室内', imgShotType: '中景', imgDesc: '坐在椅子上，手持道具...', imgCharacters: '@角色', imgEmotion: '平静', imgPrompt: '中景，坐在椅子上...' }
-          ]
+          rows: finalRows
         }
       };
 
@@ -1043,16 +1291,27 @@ ${directorCtx?.llmContextBlock || ''}`
       setNodes((nds) => [...nds, newTable]);
       setEdges((eds) => [...eds, newEdge]);
 
-      
-      
       const newExtractedScene = { id: tableId, text: selectedText, start: selectionRange.start, end: selectionRange.end };
       const updatedExtractedScenes = [...(data.extractedScenes || []), newExtractedScene];
-      
+
       setShowBookmarks(true);
       updateNodeData(id, { isGenerating: false, sceneInterceptState: 'idle', extractedScenes: updatedExtractedScenes });
-      setSelectedText(""); 
-      useAppStore.getState().setToastMsg("✅ 表格型脚本生成完毕！");
-    }, 1500);
+      setSelectedText("");
+      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' });
+      useAppStore.getState().setToastMsg(`✅ 表格型脚本生成完毕！共 ${finalRows.length} 行`);
+
+    } catch (error: any) {
+      console.error("[Table Gen Error]", error);
+      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' });
+      if (error?.name !== 'AbortError') {
+        useAppStore.getState().setToastMsg(`表格生成失败: ${error.message}`);
+      }
+    } finally {
+      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' });
+      useAppStore.getState().setAbortFission(null);
+      if (phaseInterval) clearInterval(phaseInterval);
+      updateNodeData(id, { isGenerating: false });
+    }
   };
 
   return (
@@ -1091,7 +1350,7 @@ ${directorCtx?.llmContextBlock || ''}`
             <div className="relative ml-2">
               <button 
                 onClick={(e) => { e.stopPropagation(); setShowAssetMenu(!showAssetMenu); setShowBookmarks(false); }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[10px] font-bold tracking-widest transition-all shadow-md nodrag ${showAssetMenu || extractingAsset ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-300' : 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400/70 hover:bg-indigo-500/20 hover:text-indigo-300'}`}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[10px] font-bold tracking-widest transition-all shadow-md nodrag ${showAssetMenu || extractingAsset ? 'bg-white/[0.08] border-white/20 text-white' : 'bg-white/[0.03] border-white/[0.08] text-zinc-400 hover:bg-white/[0.06] hover:text-white'}`}
               >
                 {extractingAsset ? <Loader2 size={12} className="animate-spin"/> : <Database size={12} />}
                 前置资产建档 <ChevronDown size={12} className={showAssetMenu ? "rotate-180 transition-transform" : "transition-transform"}/>
@@ -2921,7 +3180,7 @@ export const RenderNode = ({ id, data, selected }: any) => {
                              <label className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest">渲染精度 (Resolution)</label>
                              <div className="flex flex-wrap gap-1 bg-black/40 p-1.5 rounded-[12px] border border-white/5">
                                {['480P', '720P', '1080P', '4K'].map(res => (
-                                 <button key={res} onClick={() => updateNodeData(id, { resolution: res })} className={`flex-1 py-1.5 px-2 text-[11px] rounded-[8px] font-bold transition-all nodrag ${data.resolution === res ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 shadow-inner' : 'text-zinc-500 hover:text-white hover:bg-white/5 border border-transparent'}`}>{res}</button>
+                                  <button key={res} onClick={() => updateNodeData(id, { resolution: res })} className={`flex-1 py-1.5 px-2 text-[11px] rounded-[8px] font-bold transition-all nodrag ${data.resolution === res ? 'bg-white/[0.08] text-white border border-white/20 shadow-inner' : 'text-zinc-500 hover:text-white hover:bg-white/5 border border-transparent'}`}>{res}</button>
                                ))}
                              </div>
                           </div>

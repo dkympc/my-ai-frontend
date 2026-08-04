@@ -266,8 +266,8 @@ export default function EpisodeSelectModal({
           className="w-[420px] bg-[#0a0a0c]/95 backdrop-blur-3xl border border-white/[0.1] rounded-[24px] shadow-[0_40px_100px_rgba(0,0,0,0.95)] p-8 flex flex-col items-center gap-4"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="w-12 h-12 rounded-full bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center">
-            <Loader2 size={24} className="animate-spin text-indigo-400" />
+          <div className="w-12 h-12 rounded-full bg-white/[0.06] border border-white/[0.1] flex items-center justify-center">
+            <Loader2 size={24} className="animate-spin text-zinc-400" />
           </div>
           <p className="text-zinc-300 text-[14px] font-medium">正在分析剧本段落结构...</p>
           <p className="text-zinc-500 text-[11px] text-center leading-relaxed">
@@ -308,7 +308,7 @@ export default function EpisodeSelectModal({
             </button>
             <button
               onClick={handleFallbackWhole}
-              className="px-5 py-2 text-[13px] font-bold text-white bg-indigo-500 hover:bg-indigo-400 rounded-[12px] transition-all shadow-[0_0_20px_rgba(99,102,241,0.3)]"
+              className="px-5 py-2 text-[13px] font-bold text-white bg-white/10 hover:bg-white/15 rounded-[12px] transition-all"
             >
               整段提取
             </button>
@@ -337,7 +337,7 @@ export default function EpisodeSelectModal({
           <div>
             <h3 className="text-[15px] font-bold text-white tracking-wider">{title}</h3>
             <p className="text-[11px] text-zinc-500 mt-0.5">
-              检测到剧本包含 <span className="text-indigo-400 font-bold">{episodes.length}</span> 个段落
+              检测到剧本包含 <span className="text-white font-bold">{episodes.length}</span> 个段落
             </p>
           </div>
           <button
@@ -354,7 +354,7 @@ export default function EpisodeSelectModal({
             onClick={allSelected ? deselectAll : selectAll}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[11px] font-medium transition-all border ${
               allSelected
-                ? "bg-indigo-500/20 text-indigo-300 border-indigo-500/30"
+                ? "bg-white/[0.1] text-white border-white/20"
                 : "bg-white/[0.03] text-zinc-400 hover:text-white hover:bg-white/10 border-white/[0.08]"
             }`}
           >
@@ -368,7 +368,7 @@ export default function EpisodeSelectModal({
             取消全选
           </button>
           <span className="ml-auto text-[11px] text-zinc-500 tabular-nums">
-            已选 <span className="text-indigo-400 font-bold">{selectedCount}</span>/{episodes.length}
+            已选 <span className="text-zinc-200 font-bold">{selectedCount}</span>/{episodes.length}
           </span>
         </div>
 
@@ -388,7 +388,7 @@ export default function EpisodeSelectModal({
               >
                 <div
                   className={`mt-0.5 shrink-0 transition-colors ${
-                    isSelected ? "text-indigo-400" : "text-zinc-600 group-hover:text-zinc-500"
+                    isSelected ? "text-white" : "text-zinc-600 group-hover:text-zinc-500"
                   }`}
                 >
                   {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
@@ -423,7 +423,7 @@ export default function EpisodeSelectModal({
             disabled={selectedCount === 0}
             className={`px-6 py-2 text-[13px] font-bold rounded-[12px] transition-all ${
               selectedCount > 0
-                ? "bg-indigo-500 text-white hover:bg-indigo-400 shadow-[0_0_20px_rgba(99,102,241,0.4)]"
+                ? "bg-white/10 hover:bg-white/15 text-white"
                 : "bg-white/[0.03] text-zinc-600 cursor-not-allowed"
             }`}
           >

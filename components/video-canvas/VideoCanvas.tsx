@@ -93,7 +93,7 @@ function ZoomPanel() {
 }
 
 function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
-  const { activeCanvasProjectId, setActiveCanvasProjectId, canvasProjects, updateCanvasProject, canvasSettings, setCanvasSettings, isFilmControlOpen, setIsFilmControlOpen, copilotIsOpen, setCopilotIsOpen, selectionAssistEnabled, setSelectionAssistEnabled } = useAppStore();
+  const { activeCanvasProjectId, setActiveCanvasProjectId, canvasProjects, updateCanvasProject, canvasSettings, setCanvasSettings, isFilmControlOpen, setIsFilmControlOpen, copilotIsOpen, setCopilotIsOpen, selectionAssistEnabled, setSelectionAssistEnabled, fissionProgress, abortFission } = useAppStore();
   const currentProject = (canvasProjects || []).find((p: any) => p.id === activeCanvasProjectId);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(currentProject?.nodes || []);
@@ -852,7 +852,7 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
                 LLM 模型 (Canvas Chat Model)
               </label>
               <select
-                className="w-full bg-black/40 border border-white/5 focus:border-indigo-500/50 hover:bg-white/[0.01] rounded-[16px] p-3 text-[13px] text-zinc-300 outline-none cursor-pointer transition-all nodrag"
+                className="w-full bg-black/40 border border-white/5 focus:border-white/20 hover:bg-white/[0.01] rounded-[16px] p-3 text-[13px] text-zinc-300 outline-none cursor-pointer transition-all nodrag"
                 value={canvasSettings?.defaultLLMModel || 'deepseek-v4-pro'}
                 onChange={(e) => setCanvasSettings({ ...canvasSettings, defaultLLMModel: e.target.value })}
               >
@@ -948,7 +948,7 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
                 全局资产表前缀 (Asset Prompt Prefix)
               </label>
               <textarea
-                className="w-full bg-black/40 border border-white/5 focus:border-emerald-500/50 hover:bg-white/[0.01] rounded-[16px] p-3 text-[12px] text-zinc-300 outline-none w-full font-mono transition-colors nodrag nopan resize-none custom-scrollbar min-h-[70px] shadow-inner"
+                className="w-full bg-black/40 border border-white/5 focus:border-white/20 hover:bg-white/[0.01] rounded-[16px] p-3 text-[12px] text-zinc-300 outline-none w-full font-mono transition-colors nodrag nopan resize-none custom-scrollbar min-h-[70px] shadow-inner"
                 placeholder="例如：电影质感，胶片颗粒，柔光摄影..."
                 value={canvasSettings?.globalAssetPromptPrefix || ''}
                 onChange={(e) => setCanvasSettings({ ...canvasSettings, globalAssetPromptPrefix: e.target.value })}
@@ -989,7 +989,7 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
                     useAppStore.getState().setToastMsg(`🧹 已安全清除所有资产表的全局提示词前缀`);
                   }
                 }}
-                className="w-full py-3 rounded-[16px] bg-emerald-500 hover:bg-emerald-400 text-white text-[12px] font-bold tracking-widest transition-all active:scale-[0.98] shadow-[0_10px_25px_rgba(16,185,129,0.3)] flex items-center justify-center gap-2"
+                className="w-full py-3 rounded-[16px] bg-white/10 hover:bg-white/15 text-white text-[12px] font-bold tracking-widest transition-all active:scale-[0.98] flex items-center justify-center gap-2"
               >
                 <span>⚡ 穿透覆盖至所有资产表</span>
               </button>
@@ -1003,7 +1003,7 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
                 全局提示词后缀 (Prompt Suffix)
               </label>
               <textarea
-                className="w-full bg-black/40 border border-white/5 focus:border-indigo-500/50 hover:bg-white/[0.01] rounded-[16px] p-3 text-[12px] text-zinc-300 outline-none w-full font-mono transition-colors nodrag nopan resize-none custom-scrollbar min-h-[90px] shadow-inner"
+                className="w-full bg-black/40 border border-white/5 focus:border-white/20 hover:bg-white/[0.01] rounded-[16px] p-3 text-[12px] text-zinc-300 outline-none w-full font-mono transition-colors nodrag nopan resize-none custom-scrollbar min-h-[90px] shadow-inner"
                 placeholder="例如：Cinematic, highly detailed, masterpieces, 35mm film still look..."
                 value={canvasSettings?.globalPromptSuffix || ''}
                 onChange={(e) => setCanvasSettings({ ...canvasSettings, globalPromptSuffix: e.target.value })}
@@ -1069,7 +1069,7 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
                     useAppStore.getState().setToastMsg(`🧹 已安全清除所有分镜的全局提示词后缀`);
                   }
                 }}
-                className="w-full py-3 rounded-[16px] bg-indigo-500 hover:bg-indigo-400 text-white text-[12px] font-bold tracking-widest transition-all active:scale-[0.98] shadow-[0_10px_25px_rgba(99,102,241,0.3)] flex items-center justify-center gap-2"
+                className="w-full py-3 rounded-[16px] bg-white/10 hover:bg-white/15 text-white text-[12px] font-bold tracking-widest transition-all active:scale-[0.98] flex items-center justify-center gap-2"
               >
                 <span>✨ 智能追加至所有分镜</span>
               </button>
@@ -1159,11 +1159,11 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
           onClick={() => setIsFilmControlOpen(!isFilmControlOpen)}
           className={`h-10 px-4 rounded-full backdrop-blur-3xl border flex items-center gap-2 text-[12px] font-bold tracking-widest transition-all duration-300 shadow-[0_10px_30px_rgba(0,0,0,0.8)] hover:scale-105 ${
             isFilmControlOpen 
-              ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-300' 
+              ? 'bg-white/[0.08] border-white/[0.15] text-zinc-200' 
               : 'bg-black/60 border-white/[0.08] text-zinc-400 hover:text-white hover:border-white/20'
           }`}
         >
-          <Sliders size={14} className={isFilmControlOpen ? 'text-indigo-400 animate-spin-slow' : 'text-zinc-500'} />
+          <Sliders size={14} className={isFilmControlOpen ? 'text-zinc-300 animate-spin-slow' : 'text-zinc-500'} />
           影视总控
         </button>
 
@@ -1217,6 +1217,41 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
           <Settings size={18} />
         </button>
       </div>
+
+      {/* ★ 统一进度条：分镜裂变 / 摄影机 / 资产提取 / 表格生成 共用 */}
+      {fissionProgress.status !== 'idle' && (
+        <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-2 rounded-full bg-black/70 backdrop-blur-3xl border border-white/[0.08] shadow-[0_10px_30px_rgba(0,0,0,0.8)]">
+          {/* 阶段标签 */}
+          <span className="text-[11px] font-bold text-white tracking-widest whitespace-nowrap">
+            {fissionProgress.status === 'stage1' ? '🧩 阶段 1/2' :
+             fissionProgress.status === 'stage2' ? '🎨 阶段 2/2' :
+             fissionProgress.status === 'camera' ? '📷 摄影机参数' :
+             fissionProgress.status === 'asset' ? '📋 资产提取' :
+             fissionProgress.status === 'table' ? '📊 表格生成' : ''}
+          </span>
+          <span className="text-[10px] text-zinc-400 font-mono whitespace-nowrap">{fissionProgress.phase}</span>
+          {/* 动画光条：不计算百分比，纯视觉反馈 */}
+          <div className="relative w-32 h-1 bg-white/5 rounded-full overflow-hidden">
+            <div className="absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-transparent via-white/30 to-transparent rounded-full animate-[shimmer_1.2s_ease-in-out_infinite]" />
+          </div>
+          {/* ★ 中止按钮：点击后 abort 所有 LLM 请求 */}
+          {abortFission && (
+            <button
+              onClick={() => abortFission()}
+              className="flex items-center justify-center w-6 h-6 rounded-full bg-red-500/20 hover:bg-red-500/40 border border-red-500/30 transition-all ml-1"
+              title="中止分镜裂变"
+            >
+              <X size={12} className="text-red-400" />
+            </button>
+          )}
+        </div>
+      )}
+      <style jsx>{`
+        @keyframes shimmer {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(400%); }
+        }
+      `}</style>
 
       {/* 资产库组件 */}
       <AssetDock 
@@ -1321,7 +1356,7 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
                          <button 
                            key={style.id} 
                            onClick={() => setCanvasSettings({ ...canvasSettings, globalPromptSuffix: style.id })} 
-                           className={`flex flex-col items-center justify-center p-3 rounded-[16px] border transition-all duration-300 ${canvasSettings?.globalPromptSuffix === style.id ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300 shadow-[0_0_20px_rgba(99,102,241,0.2)]' : 'bg-black/50 border-white/[0.05] text-zinc-500 hover:bg-white/5 hover:text-zinc-300 hover:border-white/10'}`}
+                            className={`flex flex-col items-center justify-center p-3 rounded-[16px] border transition-all duration-300 ${canvasSettings?.globalPromptSuffix === style.id ? 'bg-white/[0.06] border-white/20 text-white' : 'bg-black/50 border-white/[0.05] text-zinc-500 hover:bg-white/5 hover:text-zinc-300 hover:border-white/10'}`}
                          >
                            <span className="text-[12px] font-medium">{style.label}</span>
                          </button>
