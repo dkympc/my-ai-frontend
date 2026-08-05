@@ -1224,7 +1224,8 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
                       {[
                         { id: 'gpt-image-2', label: 'GPT-Image-2' },
                         { id: 'banana-pro', label: 'Banana Pro' },
-                        { id: 'seedream5.0', label: 'Seedream 5.0' }
+                        { id: 'seedream5.0', label: 'Seedream 5.0' },
+                        { id: 'seedream-5-0-pro-260628', label: 'Seedream 5.0 Pro' }
                       ].map(m => (
                         <button 
                           key={m.id} 
@@ -1244,6 +1245,7 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
                       {[
                         { id: 'doubao-seedance-2-0-260128', label: 'Seedance 2.0' },
                         { id: 'doubao-seedance-2-0-fast-260128', label: 'Seedance Fast' },
+                        { id: 'seedance-2.5', label: 'Seedance 2.5' },
                         { id: 'kling-o3', label: 'Kling O3' }
                       ].map(m => (
                         <button 

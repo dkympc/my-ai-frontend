@@ -20,15 +20,19 @@ export const WORKFLOW_REGISTRY = [
 
 export const MODELS = [
   { id: 'gpt-5.4', name: 'GPT-5.4', desc: '最强逻辑与创造力' },
+  { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash', desc: '新一代极速响应' },
   { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash', desc: '极致响应速度' },
   { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro', desc: '复杂推理与长文本' },
-  { id: 'deepseek-v4-pro', name: 'DeepSeek V4', desc: '深度思考与逻辑' }
+  { id: 'deepseek-v4-pro', name: 'DeepSeek V4', desc: '深度思考与逻辑' },
+  { id: 'kimi-k2.6', name: 'Kimi 2.6', desc: '长文本理解与推理' },
+  { id: 'claude-haiku-4-5-20251001-thinking', name: 'Claude 4.5', desc: '快速推理与工具调用' },
 ];
 
 export const IMAGE_MODELS = [
   { id: 'gpt-image-2', name: 'GPT-Image-2', desc: '官方稳定生图', features: ['ratio', 'style'] },
   { id: 'banana-pro', name: 'Banana Pro (gemini-3-pro)', desc: '专业级 4K 像素与文字渲染', features: ['ratio', 'stylize', 'negative'] },
-  { id: 'seedream5.0', name: 'Seedream 5.0 (2K/3K)', desc: '极致梦幻梦境艺术', features: ['ratio', 'style', 'negative', 'sampler'] }
+  { id: 'seedream5.0', name: 'Seedream 5.0 (2K/3K)', desc: '极致梦幻梦境艺术', features: ['ratio', 'style', 'negative', 'sampler'] },
+  { id: 'seedream-5-0-pro-260628', name: 'Seedream 5.0 Pro', desc: '旗舰级画质与细节', features: ['ratio', 'style', 'negative', 'sampler'] }
 ];
 
 export const VIDEO_MODES = [
@@ -41,5 +45,6 @@ export const VIDEO_MODES = [
 export const VIDEO_MODELS = [
   { id: 'doubao-seedance-2-0-fast-260128', name: 'Seedance 2.0 Fast', features: ['ratio', 'duration', 'resolution'], modes: ['t2v', 'i2v', 'i2v-both', 'v2v'], ratios: ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'], resolutions: ['480p', '720p'] },
   { id: 'doubao-seedance-2-0-260128', name: 'Seedance 2.0', features: ['ratio', 'duration', 'resolution'], modes: ['t2v', 'i2v', 'i2v-both', 'v2v'], ratios: ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'], resolutions: ['480p', '720p', '1080p'] },
+  { id: 'seedance-2.5', name: 'Seedance 2.5', features: ['ratio', 'duration', 'resolution'], modes: ['t2v', 'i2v', 'i2v-both', 'v2v'], ratios: ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'], resolutions: ['480p', '720p', '1080p'] },
   { id: 'kling-o3', name: 'Kling O3', features: ['ratio', 'duration', 'resolution'], modes: ['t2v', 'i2v', 'i2v-both'], ratios: ['16:9', '9:16', '1:1'], resolutions: ['720p', '1080p', '4k'] }
 ];
