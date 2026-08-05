@@ -88,7 +88,7 @@ const fetchStreamingChat = async (payload: any, onChunk?: (text: string) => void
       fetchOptions.signal = combinedSignal;
     }
 
-    const response = await fetchApi('/v1/chat/completions', fetchOptions);
+    const response = await fetchApi('/v1/canvas/prompt', fetchOptions);
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
       throw new Error(`HTTP ${response.status}: ${errText}`);
@@ -440,33 +440,9 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       const payload = {
         model: targetModel,
         max_tokens: 4096,
-        messages: [
-          {
-            role: "system",
-            content: `你是一个顶尖的影视视觉总监（兼任摄影指导与美术指导）。请阅读完整剧本，推荐1套最契合的【英文全局视觉基建（涵盖介质/画风/光影基调）】。
-
-【全局画风硬约束】：当前项目已设定为【${globalStyle}】。你的所有推荐必须绝对契合此风格大类！
-
-【最严格的双轨物理隔离法则（绝对红线）】：
-1. 如果上方画风属于【二次元/动画/动漫】类：绝对禁止出现任何实拍物理摄影机（如 ARRI, RED）、胶片型号（如 35mm, Kodak Vision3）、实体镜头（如 Anamorphic, C-Series, 50mm）的词汇！二次元哪来的胶片和镜头？！你必须使用纯动画术语，如：Studio Ghibli animation, Cel shading, flat colors, Anime aesthetic, Kyoto Animation style。
-2. 如果上方画风属于【3D渲染】类：禁止使用实拍物理设备，必须使用：Unreal Engine 5 render, Octane render, Ray tracing, 3D CGI。
-3. 只有当上方画风属于【写实/电影/无特定风格】类时：才允许并必须使用顶级电影工业设备，如：Shot on ARRI Alexa 65, 35mm film, vintage anamorphic lenses。
-
-【参数生成逻辑（不要将推理过程输出）】：
-1. 视觉介质 (Medium & Engine)：极简定义底层渲染质感（必须遵照上述双轨法则）。
-2. 光学/笔触特性：实拍定义镜头畸变/质感（不写死焦距）；动画定义线条/手绘质感。
-3. 全局色彩底片 (Color Science & LUT)：极简定义全片色彩逻辑（如 Bleach Bypass，或 Anime pastel color palette）。
-4. 全局光影反差 (Macro Contrast)：定义软硬基调（如 Hard-contrast）。【时间与光源方向必须 100% 留白交由分镜决定！】
-
-【最终输出铁律】：
-你必须将上述四项参数用逗号自动拼接成【纯英文的一句话】。
-绝对禁止输出任何中文、前言后语、序号或解释！
-错误示范（二次元里掺杂实拍）：Shot on 35mm Kodak, Anime style...
-正确示范（纯二次元）：Studio Ghibli animation, soft watercolor pastel palette, Cel shading, cinematic low-contrast light
-正确示范（纯实拍）：Shot on ARRI Alexa 65, Vintage Cooke Anamorphic lenses, Bleach Bypass LUT, Hard-contrast cinematic lighting`
-          },
-          { role: "user", content: `剧本内容：\n${data.text}` }
-        ]
+        prompt_type: "camera-extract",
+        params: { GLOBAL_STYLE: globalStyle },
+        user_content: `剧本内容：\n${data.text}`
       };
 
       // ★ 流式请求：不再用 Toast 蹦代码，统一走进度条
@@ -567,33 +543,14 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
         ? `\n\n【导演全局视觉约束，提取资产时必须遵循此光影与色彩基调】：\n${directorCtx.llmContextBlock}`
         : "";
 
-      let systemPrompt = "";
-
+      // ★ 确定 prompt_type：三个资产类型各自对应不同的后端模板
+      let promptType: string;
       if (type === 'scene') {
-        systemPrompt = `你是一个顶尖的电影美术指导。通读剧本，提取选定段落中所有核心场景，场景要符合剧本元素特征，输出正确的空间描述，全部提取为正面全景。
-如剧本中未标明剧本背景（如西方，统一设定为东方风格设定）
-【绝对红线】：场景提示词(prompt)中绝对不允许出现任何人物角色！这只是一张空镜头环境概念设定图！场景中不可以出现元素之间的冲突违和，比如现代办公室不允许出现与时代或者环境不符的元素，例如清冷科技感的办公室出现粗糙的木制办公桌（除非剧本元素中包含），禁止使用夸张的色调，尽量以柔光为主，三点布光原则。
-【完整性要求】：必须提取选定段落中【全部】场景，不得遗漏任何场景！
-要求返回 JSON 数组格式，字段严格为：
-[{"id": "s1", "name": "场景名", "time": "白天/夜晚/傍晚等", "lighting": "极简纯英文光影描述(如: diffuse light, low contrast)", "stage": "该场景在剧本哪几个阶段出现", "prompt": "纯中文场景环境描述。请参考此结构：
-示例：
-正面全景
-核心氛围：死寂、诡异、压抑。这里是生命被遗忘的角落，也是故事开始的宿命之地。
-关键元素：
- 环境：遍地是杂乱无章的低矮坟包和断裂、歪斜的残碑。枯死的黑色树枝像鬼爪般伸向天空...等环境里的元素。
-特殊细节：空气中弥漫着极淡的、似有似无的灰绿色雾气。绝对不要写摄影机参数，绝对不要写任何人物！"}]`;
+        promptType = 'asset-extract-scene';
       } else if (type === 'character') {
-        systemPrompt = `你是一个顶尖的电影造型指导。通读剧本，提取选定段落中所有出场人物。
-【绝对红线】：这是角色设定图/静态立绘，绝对不要描写人物的具体剧情动作或场景交互！若同一人物在不同时期着装不同，必须分为两个独立人物行。
-【人物面容与种族自动识别约束】：请根据剧本的世界观和故事区域，自动识别并生成符合逻辑的人物种族面貌描述。若剧本背景为中国本土、东方文化地域、或未明确标明任何地域/种族特征，一概默认所有出场人物均为【中国华人】面容，保留亚洲人的五官骨架、肤色和毛发特征。若剧本明确标注为西方、异世界、奇幻、科幻等非中国背景地域，则严格按照剧本本身的暗示生成对应种族面孔。在你的 prompt 字段中，必须在最前面明确描述这个人物的具体人种与五官特征。
-【完整性要求】：必须提取选定段落中【全部】出场人物，不得遗漏任何角色！
-要求返回 JSON 数组格式，字段严格为：
-[{"id": "c1", "name": "人物名称", "age": "年龄", "clothing": "极简中文着装描述", "traits": "人物性格与特质", "stage": "出场阶段", "prompt": "纯中文角色设定描述。只需详细描写：性别、年龄、长相、外貌特征、体态、穿着款式材质、特殊细节(如伤疤/配饰)。保持静态站立姿态，绝对不要写动作、光影或画质参数！"}]`;
-      } else if (type === 'prop') {
-        systemPrompt = `你是一个顶尖的电影道具师。通读剧本，提取选定段落中所有核心道具。
-【完整性要求】：必须提取选定段落中【全部】核心道具，不得遗漏任何内容！
-要求返回 JSON 数组格式，字段严格为：
-[{"id": "p1", "name": "道具名", "stage": "出现节点", "prompt": "纯中文道具细节描述(详细描述材质、颜色、磨损程度和外观细节，保持静态单独展示)"}]`;
+        promptType = 'asset-extract-character';
+      } else {
+        promptType = 'asset-extract-prop';
       }
 
       // ★ 构建集数过滤指令（告诉 LLM 只提取选中段落，不设 max_tokens 上限，不截断剧本）
@@ -604,10 +561,9 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       // ★ 构建 payload：不设 max_tokens（让 LLM 自由输出完整 JSON），不截断剧本（发送完整 data.text）
       const payload = {
         model: targetModel,
-        messages: [
-          { role: "system", content: systemPrompt + directorInjection },
-          { role: "user", content: `剧本内容：\n${data.text}${episodeFilter}` }
-        ]
+        prompt_type: promptType,
+        params: { DIRECTOR_INJECTION: directorInjection },
+        user_content: `剧本内容：\n${data.text}${episodeFilter}`
       };
 
       // ★ 流式请求：不再用 Toast 蹦代码，统一走进度条
@@ -718,27 +674,9 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
     // 做一次轻量 LLM 调用，提取关键上下文
     const summaryPayload = {
       model,
-      messages: [
-        {
-          role: "system",
-          content: `你是一名剧本分析师。请用简洁的中文提取以下剧本的关键信息，生成结构化摘要。
-输出格式（每项一句话，不要超过 800 字总计）：
-
-【人物关系】：列出主要角色及其之间的关系（如师徒、对手、恋人等）
-【空间场景】：列出剧本中出现的主要地点/场景
-【时间线】：按顺序简述关键事件节点
-【视觉要素】：列出对画面风格有影响的关键设定（如时代背景、季节、天气、光影氛围）
-
-要求：
-- 每项一到两句话，不展开细节
-- 重点关注对后续分镜画面有影响的信息
-- 忽略对白细节，只提取人物关系与空间变化`
-        },
-        {
-          role: "user",
-          content: `请分析以下剧本，输出结构化摘要：\n\n${fullScript}`
-        }
-      ]
+      prompt_type: "script-summary",
+      params: {},
+      user_content: `请分析以下剧本，输出结构化摘要：\n\n${fullScript}`
     };
 
     try {
@@ -831,122 +769,23 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       useAppStore.getState().setFissionProgress({ status: 'stage1', phase: '分镜拆解中...' });
       const payloadStage1 = {
         model: targetModel,
-        // ★ 关闭 DeepSeek 思考模式：阶段 1 是规则装配线任务（按公式拆镜），推理文字占带宽无意义
-        //   默认思考 effort=high 会产生巨量 reasoning_content，占满 SSE 流导致 ReadError
         thinking: { type: "disabled" },
-        messages: [
-          {
-            role: "system",
-            content: `你是一名大师级分镜师兼 AI 提示词专家。你的任务是通读剧本，将剧本高级地转化为符合 AI 视频生成大模型底层逻辑的生产级分镜 JSON 数据。
-
-【智能光影推断 (shotLighting 字段)】
-你必须在 JSON 中为每一个分镜强制输出纯英文的 "shotLighting" 字段！
-推断优先级与打光规则（严格按以下顺序执行）：
-1. 优先查表与氛围继承（资产表为最高准则）：首先比对你在上下文中看到的【资产字典】。如果该场景在字典中已定义了“英文光影氛围”，你必须 100% 继承其核心色温与反差基调（如始终保持冷暖对比、低照度等），并以此为底色。
-2. 导演规则补底（降级回退）：如果未提供资产字典，或字典中该场景没有光影描述，你才需要去查阅下方《导演审美引导》中的光影倾向，使用导演推荐的英文光影咒语（English Lighting Prompts）进行打光推断。
-3. 景别裁剪（防画面污染）：基调确立后，必须结合当前分镜的具体动作与【景别】推断物理光线方向。若为[特写/极特写/近景]，绝对禁止描写画外背景光源的实体，只能输出打在主体面部/身上的纯物理光线方向与质感（如: cool blue edge light on right cheek, high contrast）。
-4. 全景保留：若为[全景/远景]，则需展现整体环境的体积光或主光源分布。
-
-【视频分镜拆解铁律】
-1. 景别参考规则：优先识别剧本中已有的景别标记(如[特写]、[全景]、[中景]、[近景])，每个分镜时长严格控制在 4-15s 之间。
-2. 对白时长 vs 导演节奏的优先级铁律（数学红线）：
-强制计算公式：【本镜对白总中文字数 ÷ 3.5 = 必须满足的最低物理安全时长（秒）】。AI 在输出每个分镜前，必须严格执行此数学计算！
- - 优先级判定：物理计算此时长绝对优先于《导演审美引导》中的节奏建议！例如：若导演建议节奏为 1-3秒，但当前台词计算需要 8秒，你必须将 duration 设定为 8秒！
- - 节奏补偿法则：如何在被台词拉长的分镜中体现导演的“快节奏”？通过切碎 timeSegments 内部的时序段来完成！（例如：8 秒的镜头，内部切分为 3-4 个剧烈的物理动作或机位转折，以此制造高密度的视觉快感）。
- - 强制拆镜红线：绝不允许将超过计算时长的台词强塞入短时长的分镜中，绝不允许两人在同一时序内静止站立说出长篇大论！若某段连续台词耗时超过 15 秒（或总字数超过 40 字），除非导演引擎明确要求“舒缓/长镜头”，否则强制要求你将此分镜拆分为多个独立镜号（如 2A 拍陈医生说话，2B 拍顾医生反应或回复）交替消化对白！
-3. 单分镜内的时序切分铁律（防偷懒与运镜解绑机制）：只要单个分镜时长>=8秒，或对白>15字，严禁在画面主体中只写一个时间段！你必须将其物理拆分为至少两个时序(如 0-5s 和 6-10s)。在时序切换时，不要局限于“硬切”，更鼓励使用连续长镜头内的“动态演进”(如动作连贯延展、平滑推拉跟摇、焦点转换 Rack Focus)。
-4. 物理视觉化描述铁律（去文学化与微表情优化）：禁止文学形容词，必须转化为物理视觉指令。情绪必须转化为微表情(如“眉头微皱”)。详细描述肌肉牵扯、物理位移、衣服褶皱变化及道具物理交互。
-5. 人物空间站位与“时序状态锚定”铁律：在每一个 timeSegments 时间段描述内，只要提及人物动作，必须强行在名字前增加当前姿态/站位状态的修辞锚定词！(如：强制写为“坐在工作台后的 @老匠人 缓缓落下镊子”)，防姿态突变。
-6. 长镜头/硬切判定：若分镜内部包含“硬切”、“黑屏”或任何形式的画面跳转，严禁在该镜号中声明其为“连续长镜头（continuous shot / single take）”。只有完全无间断、仅靠运镜和焦点变化完成全部时序的镜头，才允许冠以长镜头描述。
-7. 空间轴线锚定（防跳轴）：在双人、多人对话或同场景连续分镜中，强制锁定左右站位关系。角色 A 永远留在画面左区，角色 B 永远留在画面右区。绝对不允许越轴，除非中间插入明确越过轴线的过渡镜头（如中性空镜、第三视角游移镜头）。
-8. 双人/多人 Z 轴定位：必须采用“一前一后，必有一背”的前后物理位置关系，至少一方使用过肩镜头或脏前景。
-9. 禁止描写人物穿着：严禁在首帧或画面主体中描写人物的服装款式、颜色、材质以及发型发色（这些由参考原图或人设控制）
-
-【输出规范 (JSON Format)】
-必须严格按照以下 JSON 结构输出，包含后台算力、时序段、音效台词及机位规则：
-- shotNumber: 镜号（注意：当前画布已有分镜，本次拆分的镜号必须严格从 ${nextShotStart} 开始依次递增！例如：${nextShotStart}, ${nextShotStart}A, ${nextShotStart + 1} 等）
-- scriptFragment: 该分镜对应的剧本原文片段
-- wordCount: 对白字数
-- duration: 计算出的物理时长(4-15s)
-- scene: 物理场景描述
-- characters: 本镜头出场角色（如 @老匠人）
-- timeSegments: 时序演进数组(包含 id, time, action)。action 必须包含景别、具体画面的物理运动、人物具体的身体/面部物理动作变化等描述，若为首个时序则无需写切换方式。要求使用纯粹的物理动作指令，禁止使用抽象形容词。。
-- soundDesign: 音效与台词设计(包含 audio 和 dialogue)
-- cameraRules: 机位规则(如 nodal pan locked tripod)
-- scene: 物理场景描述
-- characters: 本镜头出场角色（如 @老匠人）
-
-【完整示例参考（长安青铜工坊：暮色机械美学）】
-(用户剧本：[全景]昏暗的青铜工坊里。老匠人坐在堆满图纸的工作台前。[特写]生锈的青铜手臂放在桌上。老匠人拿着镊子夹齿轮。[中景]老匠人神色疲惫。他缓缓摘下眼镜，擦了擦。[特写]老匠人看着未完成的机械臂，痛苦地说了一长段长台词：“他们都走了...连一块墓碑也留不下了...”)
-
-\`\`\`json
-{
-  "shots": [
-    {
-      "shotNumber": "1",
-      "scene": "昏暗的青铜工坊",
-      "characters": "@老匠人",
-      "scriptFragment": "[全景]昏暗的青铜工坊里。老匠人坐在堆满图纸的工作台前。[特写]生锈的青铜手臂放在桌上。老匠人拿着镊子夹齿轮。",
-      "wordCount": 0,
-      "duration": 8,
-      "timeSegments": [
-        { "id": "ts1", "time": "0-4s", "action": "特写镜头，坐在工作台后侧、身体前倾的 @老匠人 缓缓沉下右手。他手中的铜镊子尖端精准咬合住机械臂内的一颗微型齿轮并向内按压，齿轮下陷，机械臂的手指关节随之产生微小的受力回弹。" },
-        { "id": "ts2", "time": "5-8s", "action": "动作连贯延展，特写镜头，保持微俯姿势的 @老匠人，右手手指松开镊子，顺势拨动机械臂旁边的发条手柄。手背的肌肉线条因发力而拉紧，夕阳斜照下，工作台上的阴影随着他的手部转动动作缓缓拉长。" }
-      ],
-      "soundDesign": { "audio": "低频机械嘀嗒声，镊子与铜器轻微碰撞声，远处沉闷的风啸声。", "dialogue": "无" },
-      "cameraRules": "0-8s: nodal pan locked tripod, static shot."
-    },
-    {
-      "shotNumber": "2A",
-      "scene": "昏暗的青铜工坊",
-      "characters": "@老匠人",
-      "scriptFragment": "[中景] 老匠人神色疲惫。他缓缓摘下眼镜，擦了擦。痛苦地说：“他们都走了，只剩我这个半截入土的罪人。这只手，我拼上这条命也必须要将它拼完……”",
-      "wordCount": 32,
-      "duration": 10,
-      "timeSegments": [
-        { "id": "ts1", "time": "0-5s", "action": "中景镜头，坐在木椅上的 @老匠人，双手动作迟缓地将眼镜从脸上摘下并移至胸前，用粗糙的衣袖用力在镜片上擦拭了两下，他的胸口起伏，完成一次沉重的呼吸。" },
-        { "id": "ts2", "time": "6-10s", "action": "镜头缓慢推进 (Slow push-in)，近景镜头，戴回眼镜且坐在木椅上的 @老匠人 头部微垂。随着镜头的逼近，他的眼角肌肉产生疲惫的微颤，下巴微收，视线没有聚焦，双眼缓缓向下游离。" }
-      ],
-      "soundDesign": { "audio": "老匠人疲惫的深呼吸声，金属关节摩擦的响声。", "dialogue": "[02-10s] @老匠人（凄凉，低语）：“他们都走了，只剩我这个半截入土的罪人。这只手，我拼上这条命也必须要将它拼完……”" },
-      "cameraRules": "0-5s: static camera. 6-10s: slow continuous camera push-in."
-    },
-    {
-      "shotNumber": "2B",
-      "scene": "昏暗的青铜工坊",
-      "characters": "@老匠人",
-      "scriptFragment": "“如果连我都放弃了，那长安城内三十万死去的冤魂，就真的连一块墓碑也留不下了……”",
-      "wordCount": 38,
-      "duration": 11,
-      "timeSegments": [
-        { "id": "ts1", "time": "0-5s", "action": "近景镜头，双手抱头且上半身俯在工作台前的 @老匠人 双眼紧闭。随着他情绪的抽动，额头的皱纹明显加深，嘴角向下紧抿，一滴反光的泪水顺着粗糙的面部皮肤缓缓向下滑落。" },
-        { "id": "ts2", "time": "6-11s", "action": "焦点转换 (Rack Focus) 伴随动作延展，微特写镜头，保持抱头伏案姿态不动的 @老匠人，镜头焦点完全锁定在他面部下半段。他的下巴肌肉因哭泣而产生细微且短促的颤动，嘴唇微张。" }
-      ],
-      "soundDesign": { "audio": "老匠人颤抖的哭腔，沙哑的喉音，远处沉闷的钟声。", "dialogue": "[01-11s] @老匠人（痛苦咽泣）：“如果连我都放弃了，那长安城内三十万死去的冤魂，就真的连一块墓碑也留不下了……”" },
-      "cameraRules": "0-5s: static camera. 6-11s: macro lens, rack focus on the mouth and chin."
-    }
-  ]
-}
-\`\`\`
- 注意：本次只需输出视频动作和时序数据，生图的光影和首帧锚定在后续处理。
-${directorCtx?.llmContextBlock || ''}`
-          },
-          { 
-            role: "user", 
-            // ★ 长剧本智能压缩：有摘要用摘要，无摘要用截断（首尾各 4000 字），短剧本直接用全文
-            content: (() => {
-              let scriptContext = data.text;
-              if (data.text.length > 10000) {
-                if (data.scriptSummary) {
-                  scriptContext = data.scriptSummary; // 优先使用 LLM 预摘要
-                } else {
-                  // 兜底：截断取首尾各 4000 字
-                  scriptContext = `【剧本首部】\n${data.text.substring(0, 4000)}\n\n...(中间省略约${Math.floor((data.text.length - 8000) / 1000)}千字)...\n\n【剧本尾部】\n${data.text.substring(Math.max(0, data.text.length - 4000))}`;
-                }
-              }
-              return `【剧本上下文（用于理解故事脉络，不参与本次拆解）】：\n${scriptContext}\n\n【已拆解分镜摘要（供延续空间站位与时序逻辑）】：\n${existingShotsSummary}\n\n${dictText}\n\n【照抄用的英文全局摄影参数】：\n${data.globalCamera}\n\n【★ 本次需拆解的分镜剧本选段】：\n${selectedText}`;
-            })()
+        prompt_type: "fission-stage1",
+        params: {
+          NEXT_SHOT_START: nextShotStart,
+          DIRECTOR_CONTEXT: directorCtx?.llmContextBlock || ''
+        },
+        user_content: (() => {
+          let scriptContext = data.text;
+          if (data.text.length > 10000) {
+            if (data.scriptSummary) {
+              scriptContext = data.scriptSummary;
+            } else {
+              scriptContext = `【剧本首部】\n${data.text.substring(0, 4000)}\n\n...(中间省略约${Math.floor((data.text.length - 8000) / 1000)}千字)...\n\n【剧本尾部】\n${data.text.substring(Math.max(0, data.text.length - 4000))}`;
+            }
           }
-        ]
+          return `【剧本上下文（用于理解故事脉络，不参与本次拆解）】：\n${scriptContext}\n\n【已拆解分镜摘要（供延续空间站位与时序逻辑）】：\n${existingShotsSummary}\n\n${dictText}\n\n【照抄用的英文全局摄影参数】：\n${data.globalCamera}\n\n【★ 本次需拆解的分镜剧本选段】：\n${selectedText}`;
+        })()
       };
 
       // ★ 流式请求：不再将 LLM 原始输出灌入 Toast，仅用顶部进度条闪烁反馈
@@ -979,62 +818,10 @@ ${directorCtx?.llmContextBlock || ''}`
       useAppStore.getState().setFissionProgress({ status: 'stage2', phase: '首帧提取中...' });
       const payloadStage2 = {
         model: targetModel,
-        // ★ 关闭 DeepSeek 思考模式：阶段 2 是装配线任务（按 10 段公式拼接 imagePrompt），
-        //   43 行规则集的默认 effort=high 会产生 864KB 推理文字，撑满 SSE 流导致 ReadError
         thinking: { type: "disabled" },
-        messages: [
-          {
-            role: "system",
-            content: `你是一名顶级AI生图提示词专家。你的任务是根据提供的【视频分镜结构】，为每一个分镜生成严格符合规范的首帧图生图提示词。
-
-【绝对核心准则】
-0. 物理空间站位与调度约束（万物皆有坐标）：
-   无论景别多近，只要画面出现人物，必须在名字前强行绑定【空间参照物 + 身体基本姿态】！包含：相对距离（如紧贴、相距一臂）、高低落差（如形成以A为低点、B为高点的三角站位）以及当前姿态（站/蹲/跪）。若原分镜未提及，必须根据逻辑主动推演补充。
-1. 100%物理照抄光影与机位（防闪烁法则）：
-必须直接照抄提供的【英文全局摄影参数】，以及上一级为你智能推断出的【shotLighting 参数】！绝对不允许你自行修改、意译，绝对禁止你自行补充任何新的光线方向或光效词汇！ 你的任务只是将它们无缝拼接到提示词中。
-2. 中英混合公式（严格按此顺序拼接）：
-   提示词结构 = [当前景别与具体机位角度(含前景遮挡,中文)] + [光影光源方向(中文)] + [画面主体与场景环境(含Z轴站位,中文)] + [面部朝向与视线落点(中文)] + [定格物理动作/蓄力势能(中文)] + [定格微表情(中文)] + [动作引发的视觉动态(如飞溅/飘动,中文)] + [照抄英文全局摄影机参数] + [原样照抄分镜结构里的 shotLighting] + [动态人物肤质后缀(中文)]
-3. 定格动作约束（首帧势能法则）：
-   严禁使用 ongoing 动态词（如 ❌ '奔跑着'，改为 ✅ '单脚腾空跨步的悬停瞬间'）。动作必须写成起始瞬间、肌肉紧绷状态或重心失衡趋势，展现出即将发生下一秒动作的【运动势能】。
-
-【八大物理铁律（必须严格应用）】
-1. 拒绝“大头贴”，强制空间与Z轴关系：
-   双人/多人时，严禁无前景的单人正面特写。强制启用 Z 轴定位（口诀：一前一后，必有一背），必须使用带“脏前景”（如画面边缘带入角色B模糊的肩膀）或过肩镜头（OTS）。
-2. 机位角度与视线轴线锚定：
-   必须明确当前画面的摄影机物理角度（平视/低角度仰拍/高角度俯拍）。单人镜头严禁正脸直视镜头！必须指定面部朝向（侧脸/四分之三侧脸）和视线落点（看向画外左/右、低头看手），以暗示画外空间。
-3. 强化“运动矢量”与“视觉动态”：
-   除了描述肌肉状态和重心变化，若有激烈动作，必须补充视觉动态（如：完全刺出的剑带出的飞溅物、衣摆因剧烈动作的撕裂状飞舞、发丝被风吹乱）。
-4. 空间轴线死锁（防跳轴）：
-   双人对话锁定左右站位关系。禁止使用抽象的“画面左侧/右侧”，必须以角色自身的左右或明确的物理空间参照物来描述。
-5. 环境与光影死锁（造型零定义）：
-   同一物理场景光影必须全程继承。绝对禁止在 Prompt 中描写人物的服装款式、颜色、材质以及发型发色（这些由外置原图控制），只描述物理交互。
-6. 空镜头雷区：
-   纯场景/空镜头描述中，绝对禁止出现任何人物、动物或生物的描绘。
-7. 视频运镜特效词禁忌（防 AI 崩坏）：
-   绝对禁止在静帧描述中写入视频运镜词或时间词（如：❌残影、❌虚化、❌晃动、❌镜头推近、❌开始、❌然后），所有描述必须是一瞬间的纯静态视觉画面！
-8. 微表情写实化：
-   禁止使用夸张失真的抽象情绪词（如：❌脖子青筋鼓起、❌双目瞪圆/充血），必须改为可画出的肌肉微表情（如：眼角肌肉抽动、眉头紧锁）。
-
-【动态人物质感后缀规则】
-- 若画面涉及人物，尾部必须强制添加肤质描述。
-- 默认后缀：1:1真实肤色，可见皱纹，可见毛孔，细微绒毛。
-- 特例（红线注意）：若角色为年轻女性或小孩，必须智能剔除“粗糙”与“皱纹”，保留为：1:1真实肤色，细腻毛孔，细微绒毛。
-
-【输出格式绝对契约】
-你必须输出一个 JSON 对象，包含 "imagePrompts" 字段（字符串数组），必须一一对应传入的分镜顺序。
-\`\`\`json
-{
-  "imagePrompts": [
-    "特写，低角度仰拍，越肩视角，边缘带入模糊的木柱前景。侧面暖色硬光。昏暗青铜工坊内，坐在工作台后侧木椅上的 @老匠人，身体重心前倾，面部呈现3/4侧脸，视线向下锁定手中的机械零件。右手紧握铜镊子悬停在半空正欲夹取齿轮的蓄力瞬间，额头皱纹微显，灰尘在光柱中悬浮。Shot on 35mm Kodak Vision3 500T 5219, Wong Kar-wai low saturation... warm macro side light, deep shadow... 1:1真实肤色，可见皱纹，可见毛孔，细微绒毛"
-  ]
-}
-\`\`\``
-          },
-          { 
-            role: "user", 
-            content: `【照抄用的英文全局摄影参数】：\n${data.globalCamera}\n\n【需提取首帧图的已拆解分镜结构数组(含已由上级严格定义的shotLighting和物理动作)】：\n${JSON.stringify(json1.shots, null, 2)}`
-          }
-        ]
+        prompt_type: "fission-stage2",
+        params: {},
+        user_content: `【照抄用的英文全局摄影参数】：\n${data.globalCamera}\n\n【需提取首帧图的已拆解分镜结构数组(含已由上级严格定义的shotLighting和物理动作)】：\n${JSON.stringify(json1.shots, null, 2)}`
       };
 
       // ★ 流式请求：不再将 LLM 原始输出灌入 Toast，仅用顶部进度条闪烁反馈
@@ -1242,22 +1029,9 @@ ${directorCtx?.llmContextBlock || ''}`
 
       const payload = {
         model: targetModel,
-        messages: [
-          {
-            role: "system",
-            content: `你是一名专业场记。请根据剧本选段，生成结构化的分镜场记表 JSON。
-要求返回 JSON 数组，每个分镜一行，字段如下（全部必填）：
-[{"shotNumber": "镜号(如01)", "duration": "时长(如8s)", "camera": "摄影机运动(如static/push/dolly)", "movement": "运镜方式(如nodal pan/steadicam)", "shotType": "景别(如中景/特写/全景)", "videoDesc": "视频动作描述(纯中文，描述画面动作)", "characters": "出场角色(如@张三 @李四)", "audio": "音效设计(如环境音/对白概要)", "imgScene": "图片场景(室内/室外/具体地点)", "imgShotType": "图片景别(如中景)", "imgDesc": "图片画面描述(纯中文，静态构图)", "imgCharacters": "图片出场角色", "imgEmotion": "情绪基调(如平静/紧张/悲伤)", "imgPrompt": "生图提示词(纯中文，综合上述信息生成可用于AI生图的描述)"}]
-
-【输出铁律】：
-- 只输出纯 JSON 数组，不要任何其他文字
-- 每个分镜的 imgPrompt 必须完整融合 imgScene + imgShotType + imgDesc + imgCharacters + imgEmotion`
-          },
-          {
-            role: "user",
-            content: `剧本选段：\n${selectedText}\n\n全局摄影参数（照抄注入生图提示词）：\n${data.globalCamera || '无'}\n\n请生成场记表 JSON。`
-          }
-        ]
+        prompt_type: "field-notes",
+        params: {},
+        user_content: `剧本选段：\n${selectedText}\n\n全局摄影参数（照抄注入生图提示词）：\n${data.globalCamera || '无'}\n\n请生成场记表 JSON。`
       };
 
       const rawContent = await fetchStreamingChat(payload, undefined, abortController.signal);
