@@ -80,15 +80,19 @@ const fetchStreamingChat = async (payload: any, onChunk?: (text: string) => void
     : timeoutController.signal;
 
   try {
+    const requestBody = { ...payload, _source: 'canvas', stream: true };
+    console.log('[DEBUG][fetchStreamingChat] 发送请求体:', JSON.stringify({ model: requestBody.model, thinking: requestBody.thinking, prompt_type: requestBody.prompt_type, stream: requestBody.stream, userLen: (requestBody.user_content || '').length }, null, 2));
+
     const fetchOptions: any = {
       method: 'POST',
-      body: JSON.stringify({ ...payload, _source: 'canvas', stream: true }),
+      body: JSON.stringify(requestBody),
     };
     if (combinedSignal) {
       fetchOptions.signal = combinedSignal;
     }
 
     const response = await fetchApi('/v1/canvas/prompt', fetchOptions);
+    console.log('[DEBUG][fetchStreamingChat] 后端响应状态:', response.status, response.statusText);
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
       throw new Error(`HTTP ${response.status}: ${errText}`);
@@ -100,10 +104,20 @@ const fetchStreamingChat = async (payload: any, onChunk?: (text: string) => void
     const decoder = new TextDecoder();
     let fullText = '';
     let buffer = '';
+    let chunkCount = 0;
+    let contentChunkCount = 0;
+    let reasoningChunkCount = 0;
+    let lastLogTime = Date.now();
 
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        console.log('[DEBUG][fetchStreamingChat] 流结束 | 总块数:', chunkCount, '| content块:', contentChunkCount, '| reasoning块:', reasoningChunkCount);
+        break;
+      }
+      chunkCount++;
+      const now = Date.now();
+      const elapsed = now - lastLogTime;
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
@@ -114,13 +128,30 @@ const fetchStreamingChat = async (payload: any, onChunk?: (text: string) => void
         if (jsonStr === '[DONE]') continue;
         try {
           const parsed = JSON.parse(jsonStr);
-          const content = parsed.choices?.[0]?.delta?.content || '';
+          const delta = parsed.choices?.[0]?.delta || {};
+          const content = delta.content || '';
+          const reasoning = delta.reasoning_content || '';
+          if (reasoning) {
+            reasoningChunkCount++;
+            if (reasoningChunkCount <= 3) console.log('[DEBUG][fetchStreamingChat] 收到 reasoning_content 块 #' + reasoningChunkCount + ':', reasoning.substring(0, 100));
+          }
           if (content) {
+            contentChunkCount++;
             fullText += content;
+            if (contentChunkCount <= 2) console.log('[DEBUG][fetchStreamingChat] 收到 content 块 #' + contentChunkCount + ':', content.substring(0, 200));
             if (onChunk) onChunk(fullText);
           }
-        } catch { /* 忽略解析失败的行 */ }
+          if (!content && !reasoning) {
+            console.log('[DEBUG][fetchStreamingChat] 收到空delta块 #' + chunkCount, '| raw:', jsonStr.substring(0, 200));
+          }
+        } catch {
+          if (chunkCount <= 3) console.log('[DEBUG][fetchStreamingChat] 解析失败块 #' + chunkCount + ':', jsonStr.substring(0, 200));
+        }
       }
+      if (elapsed > 5000 && contentChunkCount === 0) {
+        console.log('[DEBUG][fetchStreamingChat] ⚠️ 已等待 ' + Math.floor(elapsed / 1000) + 's，仍未收到 content 块 | 总块数:', chunkCount, '| reasoning块:', reasoningChunkCount);
+      }
+      lastLogTime = now;
     }
 
     return fullText;
@@ -694,7 +725,7 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
 
     try {
       // ★ 使用非流式请求（stream: false），快速获取摘要结果
-      const summaryRaw = await fetchStreamingChat(summaryPayload, undefined, abortController.signal);
+      const summaryRaw = await fetchStreamingChat(summaryPayload);
       if (!summaryRaw || summaryRaw.length < 50) {
         // LLM 返回异常，回退到截断全文（取首尾各 4000 字）
         const head = fullScript.substring(0, 4000);
@@ -782,41 +813,47 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       useAppStore.getState().setFissionProgress({ status: 'stage1', phase: '分镜拆解中...' });
       const payloadStage1 = {
         model: targetModel,
-        thinking: { type: "disabled" },
+        ...(targetModel === 'deepseek-v4-pro' ? { reasoning_effort: "low" } : {}),
         prompt_type: "fission-stage1",
         params: {
           NEXT_SHOT_START: nextShotStart,
           DIRECTOR_CONTEXT: directorCtx?.llmContextBlock || ''
         },
         user_content: (() => {
-          // ★ Fission-FIX：消除上下文与选段重叠，防止 LLM 跳过第一段内容
-          // 旧逻辑将 data.text 全文作为"上下文"，然后 selectedText 作为"待拆解选段"——
-          // 但 selectedText 本身就包含在 data.text 中，LLM 在"上下文"中读过选段后，
-          // 认为"这段已经见过了"→ 跳过第一段 → 从第二段开始拆（镜号 2 起步）。
-          // 修复：上下文仅取选段之前 + 之后的剧情，绝不包含 selectedText。
           const fullText = data.text || '';
-          const selStart = selectionRange.start;
-          const selEnd = selectionRange.end;
+          const targetText = selectedText || fullText;
+          const isFullScript = !selectedText || selectedText.trim() === fullText.trim();
+          
           let scriptContext = '';
-
-          if (fullText.length > 10000) {
-            // 长剧本：优先用 LLM 摘要（不包含原文，天然无重叠），否则截断首尾
-            if (data.scriptSummary) {
-              scriptContext = data.scriptSummary;
+          if (!isFullScript) {
+            const selStart = selectionRange.start;
+            const selEnd = selectionRange.end;
+            if (fullText.length > 10000 && data.scriptSummary) {
+              scriptContext = `【全剧本故事大纲/大体脉络】：\n${data.scriptSummary}\n`;
             } else {
-              scriptContext = `【剧本首部】\n${fullText.substring(0, 4000)}\n\n...(中间省略约${Math.floor((fullText.length - 8000) / 1000)}千字)...\n\n【剧本尾部】\n${fullText.substring(Math.max(0, fullText.length - 4000))}`;
+              const beforeText = selStart > 0 ? fullText.substring(Math.max(0, selStart - 1500), selStart) : '';
+              const afterText = selEnd < fullText.length ? fullText.substring(selEnd, Math.min(selEnd + 1500, fullText.length)) : '';
+              if (beforeText) scriptContext += `【前情回顾】：\n${beforeText}\n`;
+              if (afterText) scriptContext += `\n【后续剧情线索】：\n${afterText}\n`;
             }
-          } else {
-            // ★ 短剧本：上下文 = 选段之前 + 之后的剧情（各限2000字），绝不包含 selectedText
-            const beforeText = selStart > 0 ? fullText.substring(Math.max(0, selStart - 2000), selStart) : '';
-            const afterText = selEnd < fullText.length ? fullText.substring(selEnd, Math.min(selEnd + 2000, fullText.length)) : '';
-
-            if (beforeText) scriptContext += `【选段之前的剧情（供理解故事脉络，不参与本次拆解）】：\n${beforeText}\n`;
-            if (afterText) scriptContext += `\n【选段之后的剧情（同上）】：\n${afterText}\n`;
-            if (!scriptContext) scriptContext = '（无上下文——用户选择了全文或剧本仅有选段内容）';
           }
 
-          return `【剧本上下文（用于理解故事脉络，不参与本次拆解）】：\n${scriptContext}\n\n【已拆解分镜摘要（供延续空间站位与时序逻辑）】：\n${existingShotsSummary}\n\n${dictText}\n\n【照抄用的英文全局摄影参数】：\n${data.globalCamera}\n\n【★ 本次需拆解的分镜剧本选段】：\n${selectedText}`;
+          let promptBody = '';
+          if (scriptContext) {
+            promptBody += `${scriptContext}\n`;
+          }
+          if (existingShotsSummary) {
+            promptBody += `【画布已有分镜索引（供延续空间站位与逻辑）】：\n${existingShotsSummary}\n\n`;
+          }
+          if (dictText) {
+            promptBody += `${dictText}\n\n`;
+          }
+          if (data.globalCamera) {
+            promptBody += `【全局摄影参数】：\n${data.globalCamera}\n\n`;
+          }
+          promptBody += `【★ 必须 100% 完整拆分为分镜的剧本文本】：\n${targetText}`;
+
+          return promptBody;
         })()
       };
 
@@ -917,43 +954,44 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       }
 
       // ==========================================
-      // 🚀 工业级管道 2: 首帧静帧提取 (融合《依然拆帧》+《六大铁律》)
+      // 🚀 工业级管道 2: 首帧静帧提取 (安全独立保护)
       // ==========================================
-      // ★ 切换顶部进度条到阶段 2
-      useAppStore.getState().setFissionProgress({ status: 'stage2', phase: '首帧提取中...' });
-      const payloadStage2 = {
-        model: targetModel,
-        thinking: { type: "disabled" },
-        max_tokens: 16384, // ★ 防御性设置：N个分镜的首帧提示词×200tokens/个，避免大量分镜时被截断
-        prompt_type: "fission-stage2",
-        params: {},
-        user_content: `【照抄用的英文全局摄影参数】：\n${data.globalCamera}\n\n【需提取首帧图的已拆解分镜结构数组(含已由上级严格定义的shotLighting和物理动作)】：\n${JSON.stringify(json1.shots, null, 2)}`
-      };
+      let json2: any = { imagePrompts: [] };
+      try {
+        useAppStore.getState().setFissionProgress({ status: 'stage2', phase: '首帧提取中...' });
+        const payloadStage2 = {
+          model: targetModel,
+          prompt_type: "fission-stage2",
+          params: {},
+          user_content: `【照抄用的英文全局摄影参数】：\n${data.globalCamera}\n\n【需提取首帧图的已拆解分镜结构数组(含已由上级严格定义的shotLighting和物理动作)】：\n${JSON.stringify(json1.shots, null, 2)}`
+        };
 
-      // ★ 流式请求：不再将 LLM 原始输出灌入 Toast，仅用顶部进度条闪烁反馈
-      let phase2Ticker = 0;
-      const phase2Texts = ['首帧提取中.', '首帧提取中..', '首帧提取中...'];
-      phase2Interval = setInterval(() => {
-        phase2Ticker = (phase2Ticker + 1) % phase2Texts.length;
-        useAppStore.getState().setFissionProgress({ status: 'stage2', phase: phase2Texts[phase2Ticker] });
-      }, 800);
-      const raw2 = await fetchStreamingChat(payloadStage2, undefined, abortController.signal);
-      clearInterval(phase2Interval);
-      if (!raw2) throw new Error("阶段2：LLM未返回有效内容");
-      // ★★★ 诊断日志：打印 Stage 2 LLM 原始输出，确认约束文本来源
-      if (raw2.includes('Photorealistic') || raw2.includes('粗糙皮肤')) {
-        console.log('[Stage 2 原始LLM输出 - 含约束文本]:', raw2.substring(0, 2000));
+        let phase2Ticker = 0;
+        const phase2Texts = ['首帧提取中.', '首帧提取中..', '首帧提取中...'];
+        phase2Interval = setInterval(() => {
+          phase2Ticker = (phase2Ticker + 1) % phase2Texts.length;
+          useAppStore.getState().setFissionProgress({ status: 'stage2', phase: phase2Texts[phase2Ticker] });
+        }, 800);
+        const raw2 = await fetchStreamingChat(payloadStage2, undefined, abortController.signal);
+        if (typeof phase2Interval !== 'undefined') clearInterval(phase2Interval);
+        
+        if (raw2) {
+          let cleanJson2 = raw2;
+          const match2 = raw2.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+          if (match2) {
+              cleanJson2 = match2[1];
+          } else {
+              const start = raw2.indexOf('{');
+              const end = raw2.lastIndexOf('}');
+              if (start !== -1 && end !== -1 && end >= start) cleanJson2 = raw2.substring(start, end + 1);
+          }
+          json2 = JSON.parse(cleanJson2.trim());
+        }
+      } catch (err: any) {
+        console.error('[Canvas Stage 2 Error] - 首帧提取非致命失败，降级使用默认图说明:', err);
+      } finally {
+        if (typeof phase2Interval !== 'undefined') clearInterval(phase2Interval);
       }
-      let cleanJson2 = raw2;
-      const match2 = raw2.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-      if (match2) {
-          cleanJson2 = match2[1];
-      } else {
-          const start = raw2.indexOf('{');
-          const end = raw2.lastIndexOf('}');
-          if (start !== -1 && end !== -1 && end >= start) cleanJson2 = raw2.substring(start, end + 1);
-      }
-      const json2 = JSON.parse(cleanJson2.trim());
 
       // ==========================================
       // 🚀 缝合输出阶段 (Data Merging)
@@ -961,7 +999,7 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       const fissionResult = {
         shots: json1.shots.map((shot: any, idx: number) => ({
           ...shot,
-          imagePrompt: json2.imagePrompts?.[idx] || "提取失败，请手动编写静态提示词"
+          imagePrompt: json2.imagePrompts?.[idx] || "待生成静态提示词"
         }))
       };
 
@@ -1010,8 +1048,9 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
         
         const timeSegmentsText = (shot.timeSegments || []).map((ts: any, i: number) => `【时序段 ${i + 1}】${ts.time}：${ts.action}`).join('\n');
         
-        // ★ 从 last timeSegment 的 time 字段提取总时长（如 "6-11s" → 11）
-        const actualDuration = parseDurationFromLastTS(shot.timeSegments);
+        // ★ 从 last timeSegment 的 time 字段提取总时长，并硬性锁死最大不超过 15s
+        const rawDuration = parseDurationFromLastTS(shot.timeSegments);
+        const actualDuration = Math.min(15, Math.max(3, rawDuration || 5));
 
         const fullVideoPrompt = [
           `时长：${actualDuration}s`,
@@ -1059,7 +1098,7 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
             status: 'draft', 
             referenceImage: null,
             wordCount: shot.wordCount || 0,
-            duration: parseDurationFromLastTS(shot.timeSegments),
+            duration: actualDuration,
             oneTake: shot.oneTake || null,
             spatialLayout: shot.spatialLayout || '',
             cameraRules: shot.cameraRules || '',
