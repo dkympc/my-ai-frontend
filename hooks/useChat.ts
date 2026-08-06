@@ -210,8 +210,8 @@ export function useChat(
     const payload: any = { 
       model: targetModel, messages: apiMessages, user_system_prompt: sysPrompt, 
       stream: true, temperature: settings.temperature, top_p: settings.topP,
-      // ★ 关闭 DeepSeek 思考模式：对话场景不需要显式思维链输出，节省带宽、加速响应
-      thinking: { type: "disabled" }
+      // ★ 关闭 DeepSeek 思考模式：仅对 DeepSeek 系列模型生效，GPT 等其他模型不支持此参数格式
+      ...(targetModel?.includes('deepseek') ? { thinking: { type: "disabled" } } : {})
     };
     if (isWebSearchEnabled) {
       payload.search = true; payload.enable_search = true; payload.network = true; 
