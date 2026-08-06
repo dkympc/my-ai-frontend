@@ -837,9 +837,11 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
                   if (shotsMatch) {
                       fixed = '{ "shots": ' + shotsMatch[1] + ' }';
                       try { json1 = JSON.parse(fixed.trim()); } catch {
+                          console.error('[Stage 1 JSON 修复失败 - 原始LLM输出]:', raw1.substring(0, 3000));
                           throw new Error("JSON修复失败，模型返回数据格式异常");
                       }
                   } else {
+                      console.error('[Stage 1 JSON 修复失败 - 未找到shots数组 - 原始LLM输出]:', raw1.substring(0, 3000));
                       throw new Error("JSON修复失败，模型返回数据格式异常");
                   }
               }
