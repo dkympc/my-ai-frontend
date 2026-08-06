@@ -11,7 +11,7 @@ import { DirectorRouter } from '@/lib/director-rules';
 import EpisodeSelectModal from './EpisodeSelectModal';
 
 // ★ 画布 LLM 模型白名单（与 constants.tsx MODELS 同步，用于过滤掉生图/生视频模型）
-const LLM_MODEL_IDS = ['deepseek-v4-pro', 'gpt-5.4', 'gemini-3.1-pro-preview', 'gemini-3.5-flash', 'gemini-3.6-flash', 'kimi-k2.6', 'claude-haiku-4-5-20251001-thinking'];
+const LLM_MODEL_IDS = ['deepseek-v4-pro', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gemini-3.1-pro-preview', 'gemini-3.5-flash', 'gemini-3.6-flash', 'kimi-k2.6', 'claude-haiku-4-5-20251001-thinking'];
 
 // ★ 统一 LLM 模型解析：① 节点自选模型（仅当是有效 LLM 模型时）→ ② 中控台全局默认 → ③ 硬兜底
 const resolveLLMModel = (data: any): string => {

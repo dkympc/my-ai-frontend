@@ -530,7 +530,7 @@ ${edgeLines || '  （无连线）'}
       }));
 
       const token = localStorage.getItem('yr-ai-token');
-      const copilotModel = useAppStore.getState().canvasSettings?.defaultLLMModel || 'gpt-5.4';
+      const copilotModel = useAppStore.getState().canvasSettings?.defaultLLMModel || 'gpt-5.4-mini';
       const response = await fetchApi('/v1/chat/completions', {
         method: 'POST',
         body: JSON.stringify({ model: copilotModel, messages: [{ role: 'system', content: systemPrompt }, ...allMsgs], stream: true }),

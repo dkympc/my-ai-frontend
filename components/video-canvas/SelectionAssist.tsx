@@ -124,7 +124,7 @@ export default function SelectionAssist() {
 - 回复简洁精准，不啰嗦`;
 
       const token = localStorage.getItem('yr-ai-token');
-      const assistModel = useAppStore.getState().canvasSettings?.defaultLLMModel || 'gpt-5.4';
+      const assistModel = useAppStore.getState().canvasSettings?.defaultLLMModel || 'gpt-5.4-mini';
       const response = await fetchApi('/v1/chat/completions', {
         method: 'POST',
         body: JSON.stringify({

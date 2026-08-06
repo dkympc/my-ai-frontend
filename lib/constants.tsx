@@ -19,7 +19,8 @@ export const WORKFLOW_REGISTRY = [
 ];
 
 export const MODELS = [
-  { id: 'gpt-5.4', name: 'GPT-5.4', desc: '最强逻辑与创造力' },
+  { id: 'gpt-5.4-mini', name: 'GPT-5.4', desc: '最强逻辑与创造力' },
+  { id: 'gpt-5.4-nano', name: 'GPT-5.4-mini', desc: '快速轻量推理' },
   { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash', desc: '新一代极速响应' },
   { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash', desc: '极致响应速度' },
   { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro', desc: '复杂推理与长文本' },
