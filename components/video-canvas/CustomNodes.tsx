@@ -891,6 +891,11 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       }
 
       if (!json1.shots) throw new Error("大模型返回的数据缺少 shots 字段");
+      // ★★★ 诊断日志：检查 Stage 1 输出的 shotLighting 是否含约束文本
+      const taintedShots = json1.shots.filter((s: any) => s.shotLighting?.includes('Photorealistic') || s.shotLighting?.includes('粗糙皮肤'));
+      if (taintedShots.length > 0) {
+        console.log(`[Stage 1 输出 - ${taintedShots.length}个shot的shotLighting含约束文本]:`, taintedShots.map((s: any) => ({ shotNumber: s.shotNumber, shotLighting: s.shotLighting })));
+      }
 
       // ==========================================
       // 🚀 工业级管道 2: 首帧静帧提取 (融合《依然拆帧》+《六大铁律》)
@@ -915,6 +920,10 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       const raw2 = await fetchStreamingChat(payloadStage2, undefined, abortController.signal);
       clearInterval(phase2Interval);
       if (!raw2) throw new Error("阶段2：LLM未返回有效内容");
+      // ★★★ 诊断日志：打印 Stage 2 LLM 原始输出，确认约束文本来源
+      if (raw2.includes('Photorealistic') || raw2.includes('粗糙皮肤')) {
+        console.log('[Stage 2 原始LLM输出 - 含约束文本]:', raw2.substring(0, 2000));
+      }
       let cleanJson2 = raw2;
       const match2 = raw2.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
       if (match2) {
