@@ -789,14 +789,33 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
           DIRECTOR_CONTEXT: directorCtx?.llmContextBlock || ''
         },
         user_content: (() => {
-          let scriptContext = data.text;
-          if (data.text.length > 10000) {
+          // ★ Fission-FIX：消除上下文与选段重叠，防止 LLM 跳过第一段内容
+          // 旧逻辑将 data.text 全文作为"上下文"，然后 selectedText 作为"待拆解选段"——
+          // 但 selectedText 本身就包含在 data.text 中，LLM 在"上下文"中读过选段后，
+          // 认为"这段已经见过了"→ 跳过第一段 → 从第二段开始拆（镜号 2 起步）。
+          // 修复：上下文仅取选段之前 + 之后的剧情，绝不包含 selectedText。
+          const fullText = data.text || '';
+          const selStart = selectionRange.start;
+          const selEnd = selectionRange.end;
+          let scriptContext = '';
+
+          if (fullText.length > 10000) {
+            // 长剧本：优先用 LLM 摘要（不包含原文，天然无重叠），否则截断首尾
             if (data.scriptSummary) {
               scriptContext = data.scriptSummary;
             } else {
-              scriptContext = `【剧本首部】\n${data.text.substring(0, 4000)}\n\n...(中间省略约${Math.floor((data.text.length - 8000) / 1000)}千字)...\n\n【剧本尾部】\n${data.text.substring(Math.max(0, data.text.length - 4000))}`;
+              scriptContext = `【剧本首部】\n${fullText.substring(0, 4000)}\n\n...(中间省略约${Math.floor((fullText.length - 8000) / 1000)}千字)...\n\n【剧本尾部】\n${fullText.substring(Math.max(0, fullText.length - 4000))}`;
             }
+          } else {
+            // ★ 短剧本：上下文 = 选段之前 + 之后的剧情（各限2000字），绝不包含 selectedText
+            const beforeText = selStart > 0 ? fullText.substring(Math.max(0, selStart - 2000), selStart) : '';
+            const afterText = selEnd < fullText.length ? fullText.substring(selEnd, Math.min(selEnd + 2000, fullText.length)) : '';
+
+            if (beforeText) scriptContext += `【选段之前的剧情（供理解故事脉络，不参与本次拆解）】：\n${beforeText}\n`;
+            if (afterText) scriptContext += `\n【选段之后的剧情（同上）】：\n${afterText}\n`;
+            if (!scriptContext) scriptContext = '（无上下文——用户选择了全文或剧本仅有选段内容）';
           }
+
           return `【剧本上下文（用于理解故事脉络，不参与本次拆解）】：\n${scriptContext}\n\n【已拆解分镜摘要（供延续空间站位与时序逻辑）】：\n${existingShotsSummary}\n\n${dictText}\n\n【照抄用的英文全局摄影参数】：\n${data.globalCamera}\n\n【★ 本次需拆解的分镜剧本选段】：\n${selectedText}`;
         })()
       };
@@ -905,6 +924,7 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       const payloadStage2 = {
         model: targetModel,
         thinking: { type: "disabled" },
+        max_tokens: 16384, // ★ 防御性设置：N个分镜的首帧提示词×200tokens/个，避免大量分镜时被截断
         prompt_type: "fission-stage2",
         params: {},
         user_content: `【照抄用的英文全局摄影参数】：\n${data.globalCamera}\n\n【需提取首帧图的已拆解分镜结构数组(含已由上级严格定义的shotLighting和物理动作)】：\n${JSON.stringify(json1.shots, null, 2)}`

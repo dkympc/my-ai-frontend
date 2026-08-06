@@ -111,15 +111,16 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState(currentProject?.nodes || []);
   const [edges, setEdges, onEdgesChange] = useEdgesState(currentProject?.edges || []);
   
-  // ✨ 核心修复 1：防止 React Flow 初始挂载时死锁，强制注入后端真实数据
+  // ★ Bug K 修复：仅当数据真正注入成功后才标记已加载，防止 sessionStorage 水合的空数据死锁
   const hasLoadedDataRef = useRef(false);
   useEffect(() => {
     if (currentProject && !hasLoadedDataRef.current) {
       if (currentProject.nodes && currentProject.nodes.length > 0) {
         setNodes(currentProject.nodes);
         setEdges(currentProject.edges || []);
+        hasLoadedDataRef.current = true; // ★ 移到 if 内部：只有成功注入 nodes 后才锁死
       }
-      hasLoadedDataRef.current = true;
+      // 旧代码将 hasLoadedDataRef.current = true 放在 if 外部，导致空数据也标记"已加载"，后续真实数据永远被忽略
     }
   }, [currentProject, setNodes, setEdges]);
 

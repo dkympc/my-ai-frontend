@@ -111,19 +111,16 @@ export const useAppStore = create<AppState>()(
     {
       name: 'yr-canvas-storage',
       storage: createJSONStorage(() => sessionStorage), // ★ 改用 sessionStorage：自动按浏览器会话隔离，杜绝跨账号数据污染
-      // ✨ 核心修复：把页面路由状态和画布ID一起加入缓存白名单！
+      // ★ Bug A 修复：保留完整画布数据（含 nodes/edges），不再只存 id/title/updatedAt
+      // 旧逻辑将 canvasProjects 精简为基本信息，导致 sessionStorage 水合后 VideoCanvas 误以为已加载完成
+      // sessionStorage 随浏览器标签页自动销毁，容量充足（5-10MB），不会撑爆
       partialize: (state) => ({
-        // 只保留项目的基本信息（避免撑爆 localStorage）
-        canvasProjects: (state.canvasProjects || []).map((p: any) => ({
-          id: p.id,
-          title: p.title,
-          updatedAt: p.updatedAt
-        })),
+        canvasProjects: state.canvasProjects || [],
         activeView: state.activeView,
         activeCanvasProjectId: state.activeCanvasProjectId,
-        isFilmControlOpen: state.isFilmControlOpen, // ✨ 核心修复：将抽屉开启状态加入白名单
-        copilotIsOpen: state.copilotIsOpen, // ✨ 副驾驶面板开关持久化
-        selectionAssistEnabled: state.selectionAssistEnabled, // ✨ 全局文字选中 AI 助手开关持久化
+        isFilmControlOpen: state.isFilmControlOpen,
+        copilotIsOpen: state.copilotIsOpen,
+        selectionAssistEnabled: state.selectionAssistEnabled,
       }),
     }
   )

@@ -69,7 +69,8 @@ export default function WorkspaceApp() {
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
   
   const forceSyncToServer = async () => {
-    if (!isAuthenticated || !hasLoadedFromServer) return;
+    // ★ Bug E 修复：同步前检查画布数据是否已加载，防止发送空/stripped canvasProjects 到服务器
+    if (!isAuthenticated || !hasLoadedFromServer || !hasCanvasLoaded) return;
     const freshPayload = JSON.stringify({
       sessions: sessionsRef.current,
       imageHistory: imageHistoryRef.current,
@@ -192,14 +193,14 @@ export default function WorkspaceApp() {
         headers: { 'Authorization': `Bearer ${token}` }
       }).catch(() => {});
     };
-    if (isAuthenticated && hasLoadedFromServer) {
+    if (isAuthenticated && hasLoadedFromServer && hasCanvasLoaded) {
       sendHeartbeat();
       heartbeatTimer = setInterval(sendHeartbeat, 30000);
     }
     return () => {
       if (heartbeatTimer) clearInterval(heartbeatTimer);
     };
-  }, [isAuthenticated, hasLoadedFromServer]);
+  }, [isAuthenticated, hasLoadedFromServer, hasCanvasLoaded]);
 
   const handleContainerScroll = () => {
     if (scrollRef.current) {
@@ -370,7 +371,8 @@ export default function WorkspaceApp() {
   }, [sessions, imageHistory, videoHistory, wfSessions, settings, canvasProjects]);
 
   useEffect(() => {
-    if (isInitialized && isAuthenticated && hasLoadedFromServer) {
+    // ★ Bug H 修复：增加 hasCanvasLoaded 门控，确保画布数据加载完成前不启动同步定时器
+    if (isInitialized && isAuthenticated && hasLoadedFromServer && hasCanvasLoaded) {
       const syncInterval = setInterval(() => {
         if (isDirtyRef.current) {
           isDirtyRef.current = false;
@@ -379,11 +381,12 @@ export default function WorkspaceApp() {
       }, 3000);
       return () => clearInterval(syncInterval);
     }
-  }, [isInitialized, isAuthenticated, hasLoadedFromServer]);
+  }, [isInitialized, isAuthenticated, hasLoadedFromServer, hasCanvasLoaded]);
 
   useEffect(() => {
     const handleBeforeUnload = () => {
-      if (isAuthenticated && hasLoadedFromServer) {
+      // ★ Bug I 修复：增加 hasCanvasLoaded 门控，画布数据未加载完成时不触发 beforeunload 同步
+      if (isAuthenticated && hasLoadedFromServer && hasCanvasLoaded) {
         const freshPayload = JSON.stringify({
           sessions: sessionsRef.current,
           imageHistory: imageHistoryRef.current,
@@ -401,7 +404,7 @@ export default function WorkspaceApp() {
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [isAuthenticated, hasLoadedFromServer]);
+  }, [isAuthenticated, hasLoadedFromServer, hasCanvasLoaded]);
 
   useEffect(() => {
     if (wfResultScrollRef.current && isWfRunning) {
@@ -484,7 +487,8 @@ export default function WorkspaceApp() {
   const handleLogout = async () => {
     const confirmed = await showConfirm("退出登录", "确定要退出登录吗？");
     if (confirmed) {
-      if (isAuthenticated && hasLoadedFromServer) {
+      // ★ Bug E 修复：退出登录同步前也检查 hasCanvasLoaded
+      if (isAuthenticated && hasLoadedFromServer && hasCanvasLoaded) {
         const freshPayload = JSON.stringify({
           sessions: sessionsRef.current,
           imageHistory: imageHistoryRef.current,
