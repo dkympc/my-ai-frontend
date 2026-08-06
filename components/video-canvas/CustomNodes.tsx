@@ -837,8 +837,50 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
                   if (shotsMatch) {
                       fixed = '{ "shots": ' + shotsMatch[1] + ' }';
                       try { json1 = JSON.parse(fixed.trim()); } catch {
-                          console.error('[Stage 1 JSON 修复失败 - 原始LLM输出]:', raw1.substring(0, 3000));
-                          throw new Error("JSON修复失败，模型返回数据格式异常");
+                          // 修复 4：逐个提取 shot 对象（按 "shotNumber" 分界，容错对话中的未转义引号）
+                          try {
+                              const shotObjects: any[] = [];
+                              // 找到所有 shotNumber 的位置，向前找 {，向后找匹配的 }
+                              const shotKeyRegex = /"shotNumber"\s*:\s*"/g;
+                              let match: RegExpExecArray | null;
+                              const positions: number[] = [];
+                              while ((match = shotKeyRegex.exec(shotsMatch[1])) !== null) {
+                                  positions.push(match.index + match[0].length);
+                              }
+                              for (let i = 0; i < positions.length; i++) {
+                                  const shotStart = positions[i];
+                                  // 从这个位置向前找最近的非转义 {
+                                  const textBefore = shotsMatch[1].substring(0, shotStart);
+                                  const braceIdx = textBefore.lastIndexOf('{');
+                                  if (braceIdx === -1) continue;
+                                  // 从这个 { 开始计数，找到匹配的 }
+                                  let depth = 0;
+                                  let endIdx = braceIdx;
+                                  let inString = false;
+                                  let escapeNext = false;
+                                  for (let j = braceIdx; j < shotsMatch[1].length; j++) {
+                                      const ch = shotsMatch[1][j];
+                                      if (escapeNext) { escapeNext = false; continue; }
+                                      if (ch === '\\') { escapeNext = true; continue; }
+                                      if (ch === '"') { inString = !inString; continue; }
+                                      if (inString) continue;
+                                      if (ch === '{') depth++;
+                                      if (ch === '}') { depth--; if (depth === 0) { endIdx = j + 1; break; } }
+                                  }
+                                  const shotJson = shotsMatch[1].substring(braceIdx, endIdx);
+                                  try {
+                                      shotObjects.push(JSON.parse(shotJson));
+                                  } catch { /* 个别shot解析失败，跳过 */ }
+                              }
+                              if (shotObjects.length > 0) {
+                                  json1 = { shots: shotObjects };
+                              } else {
+                                  throw new Error('no shots extracted');
+                              }
+                          } catch {
+                              console.error('[Stage 1 JSON 修复失败 - 原始LLM输出]:', raw1.substring(0, 3000));
+                              throw new Error("JSON修复失败，模型返回数据格式异常");
+                          }
                       }
                   } else {
                       console.error('[Stage 1 JSON 修复失败 - 未找到shots数组 - 原始LLM输出]:', raw1.substring(0, 3000));
