@@ -69,7 +69,7 @@ const forceDownload = async (url: string, filename: string) => {
 // 原理：用 SSE 逐 chunk 读取，同时通过 onChunk 回调实时展示生成进度
 // 改动：统一走 fetchApi，享受 401/402/403 全局拦截 + API_BASE 前缀 + 统一 Auth
 // ★ 新增 AbortSignal 支持 + 5 分钟超时兜底，防止 SSE 流挂起导致按钮永久转圈
-const fetchStreamingChat = async (payload: any, onChunk?: (text: string) => void, signal?: AbortSignal): Promise<string> => {
+const fetchStreamingChat = async (payload: any, onChunk?: (text: string) => void, signal?: AbortSignal, onThinking?: () => void, onConnected?: () => void): Promise<string> => {
   // ★ 超时 AbortController：8 分钟兜底，防止 SSE 流永久挂起（分镜裂变 Prompt 较长，需要更宽松的超时）
   const timeoutController = new AbortController();
   const timeoutId = setTimeout(() => timeoutController.abort(), 8 * 60 * 1000);
@@ -81,7 +81,7 @@ const fetchStreamingChat = async (payload: any, onChunk?: (text: string) => void
 
   try {
     const requestBody = { ...payload, _source: 'canvas', stream: true };
-    console.log('[DEBUG][fetchStreamingChat] 发送请求体:', JSON.stringify({ model: requestBody.model, thinking: requestBody.thinking, prompt_type: requestBody.prompt_type, stream: requestBody.stream, userLen: (requestBody.user_content || '').length }, null, 2));
+    console.log('[DEBUG][fetchStreamingChat] 发送请求体:', JSON.stringify({ model: requestBody.model, reasoning_effort: requestBody.reasoning_effort, thinking: requestBody.thinking, temperature: requestBody.temperature, prompt_type: requestBody.prompt_type, stream: requestBody.stream, userLen: (requestBody.user_content || '').length }, null, 2));
 
     const fetchOptions: any = {
       method: 'POST',
@@ -104,20 +104,10 @@ const fetchStreamingChat = async (payload: any, onChunk?: (text: string) => void
     const decoder = new TextDecoder();
     let fullText = '';
     let buffer = '';
-    let chunkCount = 0;
-    let contentChunkCount = 0;
-    let reasoningChunkCount = 0;
-    let lastLogTime = Date.now();
 
     while (true) {
       const { done, value } = await reader.read();
-      if (done) {
-        console.log('[DEBUG][fetchStreamingChat] 流结束 | 总块数:', chunkCount, '| content块:', contentChunkCount, '| reasoning块:', reasoningChunkCount);
-        break;
-      }
-      chunkCount++;
-      const now = Date.now();
-      const elapsed = now - lastLogTime;
+      if (done) break;
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
@@ -128,30 +118,15 @@ const fetchStreamingChat = async (payload: any, onChunk?: (text: string) => void
         if (jsonStr === '[DONE]') continue;
         try {
           const parsed = JSON.parse(jsonStr);
-          const delta = parsed.choices?.[0]?.delta || {};
-          const content = delta.content || '';
-          const reasoning = delta.reasoning_content || '';
-          if (reasoning) {
-            reasoningChunkCount++;
-            if (reasoningChunkCount <= 3) console.log('[DEBUG][fetchStreamingChat] 收到 reasoning_content 块 #' + reasoningChunkCount + ':', reasoning.substring(0, 100));
-          }
+          const content = parsed.choices?.[0]?.delta?.content || '';
           if (content) {
-            contentChunkCount++;
             fullText += content;
-            if (contentChunkCount <= 2) console.log('[DEBUG][fetchStreamingChat] 收到 content 块 #' + contentChunkCount + ':', content.substring(0, 200));
             if (onChunk) onChunk(fullText);
           }
-          if (!content && !reasoning) {
-            console.log('[DEBUG][fetchStreamingChat] 收到空delta块 #' + chunkCount, '| raw:', jsonStr.substring(0, 200));
-          }
         } catch {
-          if (chunkCount <= 3) console.log('[DEBUG][fetchStreamingChat] 解析失败块 #' + chunkCount + ':', jsonStr.substring(0, 200));
+          // 忽略解析失败的行
         }
       }
-      if (elapsed > 5000 && contentChunkCount === 0) {
-        console.log('[DEBUG][fetchStreamingChat] ⚠️ 已等待 ' + Math.floor(elapsed / 1000) + 's，仍未收到 content 块 | 总块数:', chunkCount, '| reasoning块:', reasoningChunkCount);
-      }
-      lastLogTime = now;
     }
 
     return fullText;
@@ -181,6 +156,16 @@ const combineAbortSignals = (...signals: AbortSignal[]): AbortSignal => {
     s.addEventListener('abort', onAbort);
   });
   return controller.signal;
+};
+
+// ★ 画布流式响应清洗：剥离上游偶发混入的运行提醒，避免污染分镜 JSON
+const sanitizeCanvasStreamText = (text: string): string => {
+  if (!text) return text;
+  return text
+    .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, '')
+    .replace(/<\/?system-reminder>/gi, '')
+    .replace(/<assistant-reminder>[\s\S]*?<\/assistant-reminder>/gi, '')
+    .replace(/<\/?assistant-reminder>/gi, '');
 };
 
 // ✨ 高级黑玻璃禅定编辑器 (Zen Mode)
@@ -473,17 +458,18 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       const globalStyle = useAppStore.getState().canvasSettings?.globalPromptSuffix || "无特定风格";
 
       // ★ 启动进度条
-      useAppStore.getState().setFissionProgress({ status: 'camera', phase: '参数生成中.' });
+      useAppStore.getState().setFissionProgress({ status: 'camera', phase: '参数生成中.', mode: 'generating' });
       const phaseTexts = ['参数生成中.', '参数生成中..', '参数生成中...'];
       let ticker = 0;
       phaseInterval = setInterval(() => {
         ticker = (ticker + 1) % phaseTexts.length;
-        useAppStore.getState().setFissionProgress({ status: 'camera', phase: phaseTexts[ticker] });
+        useAppStore.getState().setFissionProgress({ status: 'camera', phase: phaseTexts[ticker], mode: 'generating' });
       }, 800);
 
       const payload = {
         model: targetModel,
         max_tokens: 4096,
+        ...(targetModel === 'deepseek-v4-pro' ? { thinking: { type: "disabled" } } : {}),
         prompt_type: "camera-extract",
         params: { GLOBAL_STYLE: globalStyle },
         user_content: `剧本内容：\n${data.text}`
@@ -493,16 +479,16 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       const cameraParams = (await fetchStreamingChat(payload, undefined, abortController.signal)).trim() || "Shot on 35mm lens, cinematic lighting, 8k resolution";
       
       updateNodeData(id, { globalCamera: cameraParams, model: targetModel });
-      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' });
+      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '', mode: 'generating' });
       useAppStore.getState().setToastMsg(`✅ 全局摄影机 & 调性已锁定！`);
     } catch (error: any) {
       console.error("提取摄影机失败:", error);
-      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' });
+      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '', mode: 'generating' });
       if (error?.name !== 'AbortError') {
         useAppStore.getState().setToastMsg(`摄影机锁定失败: ${error.message || '请检查模型或网络'}`);
       }
     } finally {
-      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' });
+      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '', mode: 'generating' });
       useAppStore.getState().setAbortFission(null);
       if (phaseInterval) clearInterval(phaseInterval);
       updateNodeData(id, { isExtractingCamera: false });
@@ -566,12 +552,12 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
     let phaseInterval: NodeJS.Timeout | undefined;
 
     // ★ 启动进度条
-    useAppStore.getState().setFissionProgress({ status: 'asset', phase: `${typeLabel}提取中.` });
+    useAppStore.getState().setFissionProgress({ status: 'asset', phase: `${typeLabel}提取中.`, mode: 'generating' });
     const phaseTexts = [`${typeLabel}提取中.`, `${typeLabel}提取中..`, `${typeLabel}提取中...`];
     let ticker = 0;
     phaseInterval = setInterval(() => {
       ticker = (ticker + 1) % phaseTexts.length;
-      useAppStore.getState().setFissionProgress({ status: 'asset', phase: phaseTexts[ticker] });
+      useAppStore.getState().setFissionProgress({ status: 'asset', phase: phaseTexts[ticker], mode: 'generating' });
     }, 800);
 
     try {
@@ -648,17 +634,17 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
 
       setNodes((nds) => [...nds, newTableNode]);
       setEdges((eds) => [...eds, newEdge]);
-      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' });
+      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '', mode: 'generating' });
       useAppStore.getState().setToastMsg(`✅ ${typeLabel}数据表生成成功！共${finalRows.length}条`);
 
     } catch (error: any) {
       console.error("[Asset Extract Error]", error);
-      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' });
+      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '', mode: 'generating' });
       if (error?.name !== 'AbortError') {
         useAppStore.getState().setToastMsg(`数据表生成失败: ${error.message}`);
       }
     } finally {
-      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' });
+      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '', mode: 'generating' });
       useAppStore.getState().setAbortFission(null);
       if (phaseInterval) clearInterval(phaseInterval);
       setExtractingAsset(null);
@@ -802,7 +788,7 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       // ★ 长剧本预摘要：超过 10000 字时，先用一次轻量 LLM 调用提取故事脉络
       // 摘要缓存到 data.scriptSummary，后续裂变直接复用
       if (data.text && data.text.length > 10000 && !data.scriptSummary) {
-        useAppStore.getState().setFissionProgress({ status: 'stage1', phase: '剧本摘要生成中...' });
+        useAppStore.getState().setFissionProgress({ status: 'stage1', phase: '剧本摘要生成中...', mode: 'generating' });
         await preSummarizeScript(data.text, targetModel);
       }
 
@@ -810,10 +796,16 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       // 🚀 工业级管道 1: 视频分镜拆解 (100% 满血还原，绝不删减)
       // ==========================================
       // ★ 用顶部进度条替代 Toast 显示 LLM 原始输出
-      useAppStore.getState().setFissionProgress({ status: 'stage1', phase: '分镜拆解中...' });
+      useAppStore.getState().setFissionProgress({ status: 'stage1', phase: '分镜拆解中...', mode: 'generating' });
       const payloadStage1 = {
         model: targetModel,
-        ...(targetModel === 'deepseek-v4-pro' ? { reasoning_effort: "low" } : {}),
+        // ★ DeepSeek V4 Pro：分镜属于长链路推理任务，优先走 max 思考强度
+        // 这里不再强行关闭 thinking，避免把模型压回普通输出路径，导致 stage1 卡在半截 JSON
+        ...(targetModel === 'deepseek-v4-pro' ? { thinking: { type: "disabled" } } : {}),
+        // ★ GPT-5.4 系列：API易要求 temperature=1，用 reasoning_effort 控制推理深度（thinking: {type:enabled} 不被上游强制执行预算）
+        ...(['gpt-5.4-mini', 'gpt-5.4-nano'].includes(targetModel) ? { reasoning_effort: "low", temperature: 1 } : {}),
+        // ★ Kimi 2.6：保留 thinking 但降低预算（Kimi 无 temperature=1 限制）
+        ...(['kimi-k2.6'].includes(targetModel) ? { thinking: { type: "enabled", budget_tokens: 8000 } } : {}),
         prompt_type: "fission-stage1",
         params: {
           NEXT_SHOT_START: nextShotStart,
@@ -857,14 +849,33 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
         })()
       };
 
-      // ★ 流式请求：不再将 LLM 原始输出灌入 Toast，仅用顶部进度条闪烁反馈
+      // ★ 流式请求：用 onThinking 回调感知模型思考状态，用 onChunk 感知实际内容产出
+      // 思考中 → 进度条显示"模型思考中..."（液态玻璃呼吸动画）
+      // 有内容 → 进度条切换为"分镜 JSON 生成中..."（流光动画）
       let phase1Ticker = 0;
       const phase1Texts = ['分镜拆解中.', '分镜拆解中..', '分镜拆解中...'];
       phase1Interval = setInterval(() => {
         phase1Ticker = (phase1Ticker + 1) % phase1Texts.length;
-        useAppStore.getState().setFissionProgress({ status: 'stage1', phase: phase1Texts[phase1Ticker] });
+        useAppStore.getState().setFissionProgress({ status: 'stage1', phase: phase1Texts[phase1Ticker], mode: 'generating' });
       }, 800);
-      const raw1 = await fetchStreamingChat(payloadStage1, undefined, abortController.signal);
+      const raw1 = await fetchStreamingChat(payloadStage1,
+        (text) => {
+          // ★ 收到实际内容时：停止点号循环，切换为"生成中"模式
+          if (phase1Interval) clearInterval(phase1Interval);
+          useAppStore.getState().setFissionProgress({ status: 'stage1', phase: '分镜 JSON 生成中...', mode: 'generating' });
+        },
+        abortController.signal,
+        () => {
+          // ★ 模型开始推理思考时：立即停止点号循环，切换为"思考中"呼吸动画
+          if (phase1Interval) clearInterval(phase1Interval);
+          useAppStore.getState().setFissionProgress({ status: 'stage1', phase: '模型正在理解剧本结构...', mode: 'thinking' });
+        },
+        () => {
+          // ★ 收到首个 SSE 块（上游已接收请求）：切换为"已连接"微光脉冲态
+          if (phase1Interval) clearInterval(phase1Interval);
+          useAppStore.getState().setFissionProgress({ status: 'stage1', phase: '模型已连接，正在处理...', mode: 'connected' });
+        }
+      );
       clearInterval(phase1Interval);
       if (!raw1) throw new Error("阶段1：LLM未返回有效内容");
       let cleanJson1 = raw1;
@@ -958,10 +969,14 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       // ==========================================
       let json2: any = { imagePrompts: [] };
       try {
-        useAppStore.getState().setFissionProgress({ status: 'stage2', phase: '首帧提取中...' });
+        useAppStore.getState().setFissionProgress({ status: 'stage2', phase: '首帧提取中...', mode: 'generating' });
         const payloadStage2 = {
           model: targetModel,
-          prompt_type: "fission-stage2",
+        // ★ DeepSeek V4 Pro：第二阶段也沿用 max 思考强度，保持与 stage1 同一条稳定链路
+        ...(targetModel === 'deepseek-v4-pro' ? { thinking: { type: "disabled" } } : {}),
+        ...(['gpt-5.4-mini', 'gpt-5.4-nano'].includes(targetModel) ? { reasoning_effort: "low", temperature: 1 } : {}),
+        ...(['kimi-k2.6'].includes(targetModel) ? { thinking: { type: "enabled", budget_tokens: 8000 } } : {}),
+        prompt_type: "fission-stage2",
           params: {},
           user_content: `【照抄用的英文全局摄影参数】：\n${data.globalCamera}\n\n【需提取首帧图的已拆解分镜结构数组(含已由上级严格定义的shotLighting和物理动作)】：\n${JSON.stringify(json1.shots, null, 2)}`
         };
@@ -970,9 +985,23 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
         const phase2Texts = ['首帧提取中.', '首帧提取中..', '首帧提取中...'];
         phase2Interval = setInterval(() => {
           phase2Ticker = (phase2Ticker + 1) % phase2Texts.length;
-          useAppStore.getState().setFissionProgress({ status: 'stage2', phase: phase2Texts[phase2Ticker] });
+          useAppStore.getState().setFissionProgress({ status: 'stage2', phase: phase2Texts[phase2Ticker], mode: 'generating' });
         }, 800);
-        const raw2 = await fetchStreamingChat(payloadStage2, undefined, abortController.signal);
+        const raw2 = await fetchStreamingChat(payloadStage2,
+          (text) => {
+            if (phase2Interval) clearInterval(phase2Interval);
+            useAppStore.getState().setFissionProgress({ status: 'stage2', phase: '首帧咒语生成中...', mode: 'generating' });
+          },
+          abortController.signal,
+          () => {
+            if (phase2Interval) clearInterval(phase2Interval);
+            useAppStore.getState().setFissionProgress({ status: 'stage2', phase: '模型正在分析分镜结构...', mode: 'thinking' });
+          },
+          () => {
+            if (phase2Interval) clearInterval(phase2Interval);
+            useAppStore.getState().setFissionProgress({ status: 'stage2', phase: '模型已连接，正在处理...', mode: 'connected' });
+          }
+        );
         if (typeof phase2Interval !== 'undefined') clearInterval(phase2Interval);
         
         if (raw2) {
@@ -1152,11 +1181,11 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       setShowBookmarks(true);
       updateNodeData(id, { sceneInterceptState: 'idle', extractedScenes: updatedExtractedScenes });
       setSelectedText(""); 
-      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' }); // ★ 重置进度条
+      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '', mode: 'generating' }); // ★ 重置进度条
       useAppStore.getState().setToastMsg(`✅ 裂变成功！已生成 ${fissionResult.shots.length} 个分镜卡片。`);
 
     } catch (error: any) {
-      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' }); // ★ 重置进度条
+      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '', mode: 'generating' }); // ★ 重置进度条
       // ★ AbortError 是用户主动中止，不报错不输出控制台；其他错误正常显示
       if (error?.name !== 'AbortError') {
         console.error("[裂变解析错误]", error);
@@ -1164,7 +1193,7 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       }
     } finally {
       // 🔥 最终关闭转圈状态
-      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' }); // ★ 兜底重置进度条
+      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '', mode: 'generating' }); // ★ 兜底重置进度条
       useAppStore.getState().setAbortFission(null); // ★ 清除中止函数
       // ★ 清理 phase interval（防御性：如果在 setInterval 之后、clearInterval 之前抛异常）
       try { if (typeof phase1Interval !== 'undefined') clearInterval(phase1Interval); } catch {}
@@ -1192,12 +1221,12 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
     let phaseInterval: NodeJS.Timeout | undefined;
 
     // ★ 启动进度条
-    useAppStore.getState().setFissionProgress({ status: 'table', phase: '表格生成中.' });
+    useAppStore.getState().setFissionProgress({ status: 'table', phase: '表格生成中.', mode: 'generating' });
     const phaseTexts = ['表格生成中.', '表格生成中..', '表格生成中...'];
     let ticker = 0;
     phaseInterval = setInterval(() => {
       ticker = (ticker + 1) % phaseTexts.length;
-      useAppStore.getState().setFissionProgress({ status: 'table', phase: phaseTexts[ticker] });
+      useAppStore.getState().setFissionProgress({ status: 'table', phase: phaseTexts[ticker], mode: 'generating' });
     }, 800);
 
     try {
@@ -1258,17 +1287,17 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       setShowBookmarks(true);
       updateNodeData(id, { isGenerating: false, sceneInterceptState: 'idle', extractedScenes: updatedExtractedScenes });
       setSelectedText("");
-      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' });
+      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '', mode: 'generating' });
       useAppStore.getState().setToastMsg(`✅ 表格型脚本生成完毕！共 ${finalRows.length} 行`);
 
     } catch (error: any) {
       console.error("[Table Gen Error]", error);
-      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' });
+      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '', mode: 'generating' });
       if (error?.name !== 'AbortError') {
         useAppStore.getState().setToastMsg(`表格生成失败: ${error.message}`);
       }
     } finally {
-      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' });
+      useAppStore.getState().setFissionProgress({ status: 'idle', phase: '', mode: 'generating' });
       useAppStore.getState().setAbortFission(null);
       if (phaseInterval) clearInterval(phaseInterval);
       updateNodeData(id, { isGenerating: false });

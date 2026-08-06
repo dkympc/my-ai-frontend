@@ -23,8 +23,8 @@ interface AppState {
   isFilmControlOpen: boolean; // ✨ 新增：影视中控台抽屉开关状态
   copilotIsOpen: boolean; // ✨ 新增：AI 副驾驶抽屉开关状态
   selectionAssistEnabled: boolean; // ✨ 新增：全局文字选中 AI 助手开关
-  fissionProgress: { status: 'idle' | 'stage1' | 'stage2' | 'camera' | 'asset' | 'table'; phase: string }; // ✨ 分镜/摄影机/资产/表格统一进度条状态
-  setFissionProgress: (progress: { status: 'idle' | 'stage1' | 'stage2' | 'camera' | 'asset' | 'table'; phase: string }) => void;
+  fissionProgress: { status: 'idle' | 'stage1' | 'stage2' | 'camera' | 'asset' | 'table'; phase: string; mode: 'connected' | 'thinking' | 'generating' }; // ✨ 三态：connected(已连接) / thinking(推理中) / generating(生成中)
+  setFissionProgress: (progress: { status: 'idle' | 'stage1' | 'stage2' | 'camera' | 'asset' | 'table'; phase: string; mode: 'connected' | 'thinking' | 'generating' }) => void;
   abortFission: (() => void) | null; // ★ 分镜中止函数（由 VideoCanvas 进度条的中止按钮调用）
   setAbortFission: (fn: (() => void) | null) => void;
   settings: AppSettings;
@@ -84,7 +84,7 @@ export const useAppStore = create<AppState>()(
       isFilmControlOpen: false, // ✨ 新增：中控台默认关闭
       copilotIsOpen: false, // ✨ 新增：副驾驶默认关闭
       selectionAssistEnabled: true, // ✨ 新增：全局文字选中 AI 助手默认开启
-      fissionProgress: { status: 'idle', phase: '' }, // ✨ 新增：分镜裂变进度条默认空闲
+      fissionProgress: { status: 'idle', phase: '', mode: 'generating' }, // ✨ 新增：分镜裂变进度条默认空闲
       setFissionProgress: (progress) => set({ fissionProgress: progress }),
       abortFission: null, // ★ 分镜中止函数默认无操作
       setAbortFission: (fn) => set({ abortFission: fn }),

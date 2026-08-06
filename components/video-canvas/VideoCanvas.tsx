@@ -1160,8 +1160,17 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
       </div>
 
       {/* ★ 统一进度条：分镜裂变 / 摄影机 / 资产提取 / 表格生成 共用 */}
+      {/* 三态动画：connected = 单点微光脉冲 / thinking = 边框呼吸+3点错峰 / generating = 流光滑条 */}
       {fissionProgress.status !== 'idle' && (
-        <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-2 rounded-full bg-black/70 backdrop-blur-3xl border border-white/[0.08] shadow-[0_10px_30px_rgba(0,0,0,0.8)]">
+        <div className={[
+          "absolute top-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-2.5 rounded-full",
+          "bg-black/70 backdrop-blur-3xl border shadow-[0_10px_30px_rgba(0,0,0,0.8)]",
+          fissionProgress.mode === 'connected'
+            ? "border-white/[0.10] animate-[breath-border-soft_3.0s_ease-in-out_infinite]"
+            : fissionProgress.mode === 'thinking'
+            ? "border-white/[0.15] animate-[breath-border_2.4s_ease-in-out_infinite]"
+            : "border-white/[0.08]"
+        ].join(' ')}>
           {/* 阶段标签 */}
           <span className="text-[11px] font-bold text-white tracking-widest whitespace-nowrap">
             {fissionProgress.status === 'stage1' ? '🧩 阶段 1/2' :
@@ -1170,12 +1179,36 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
              fissionProgress.status === 'asset' ? '📋 资产提取' :
              fissionProgress.status === 'table' ? '📊 表格生成' : ''}
           </span>
-          <span className="text-[10px] text-zinc-400 font-mono whitespace-nowrap">{fissionProgress.phase}</span>
-          {/* 动画光条：不计算百分比，纯视觉反馈 */}
-          <div className="relative w-32 h-1 bg-white/5 rounded-full overflow-hidden">
-            <div className="absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-transparent via-white/30 to-transparent rounded-full animate-[shimmer_1.2s_ease-in-out_infinite]" />
-          </div>
-          {/* ★ 中止按钮：点击后 abort 所有 LLM 请求 */}
+
+          {/* ★ 三态感知的阶段文字 */}
+          <span className={[
+            "text-[11px] font-mono whitespace-nowrap transition-colors duration-700",
+            fissionProgress.mode === 'connected' ? "text-white/50"
+              : fissionProgress.mode === 'thinking' ? "text-white/70"
+              : "text-zinc-400"
+          ].join(' ')}>
+            {fissionProgress.phase}
+          </span>
+
+          {/* ★ 三态动画区 */}
+          {fissionProgress.mode === 'connected' ? (
+            // ★ connected 态：单圆点微光慢脉冲（3s 周期）
+            <span className="inline-block w-2 h-2 rounded-full bg-white/30 animate-[breath-dot-slow_3.0s_ease-in-out_infinite]" />
+          ) : fissionProgress.mode === 'thinking' ? (
+            // ★ thinking 态：3 圆点错峰呼吸
+            <div className="flex items-center gap-1.5">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-white/40 animate-[breath-dot_1.4s_ease-in-out_infinite]" />
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-white/40 animate-[breath-dot_1.4s_ease-in-out_0.2s_infinite]" />
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-white/40 animate-[breath-dot_1.4s_ease-in-out_0.4s_infinite]" />
+            </div>
+          ) : (
+            // ★ generating 态：流光滑条
+            <div className="relative w-32 h-1 bg-white/5 rounded-full overflow-hidden">
+              <div className="absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-transparent via-white/30 to-transparent rounded-full animate-[shimmer_1.2s_ease-in-out_infinite]" />
+            </div>
+          )}
+
+          {/* ★ 中止按钮 */}
           {abortFission && (
             <button
               onClick={() => abortFission()}
@@ -1191,6 +1224,22 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
         @keyframes shimmer {
           0% { transform: translateX(-100%); }
           100% { transform: translateX(400%); }
+        }
+        @keyframes breath-border {
+          0%, 100% { border-color: rgba(255,255,255,0.06); box-shadow: 0 10px 30px rgba(0,0,0,0.8), 0 0 20px rgba(255,255,255,0.02); }
+          50% { border-color: rgba(255,255,255,0.18); box-shadow: 0 10px 30px rgba(0,0,0,0.8), 0 0 40px rgba(255,255,255,0.06); }
+        }
+        @keyframes breath-border-soft {
+          0%, 100% { border-color: rgba(255,255,255,0.06); box-shadow: 0 10px 30px rgba(0,0,0,0.8), 0 0 12px rgba(255,255,255,0.01); }
+          50% { border-color: rgba(255,255,255,0.12); box-shadow: 0 10px 30px rgba(0,0,0,0.8), 0 0 24px rgba(255,255,255,0.03); }
+        }
+        @keyframes breath-dot {
+          0%, 100% { opacity: 0.3; transform: scale(1); }
+          50% { opacity: 0.9; transform: scale(1.6); }
+        }
+        @keyframes breath-dot-slow {
+          0%, 100% { opacity: 0.2; transform: scale(0.8); }
+          50% { opacity: 0.7; transform: scale(1.3); }
         }
       `}</style>
 
