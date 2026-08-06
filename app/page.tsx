@@ -276,9 +276,9 @@ export default function LandingPage() {
         {/* ---- Hero ---- */}
         <section ref={(el) => setSectionRef("hero", el)} data-section="hero"
           className="snap-section flex flex-col items-center justify-center text-center h-screen px-6">
-          <div className="section-reveal section-reveal-d1 inline-flex items-center gap-2 px-5 py-2 rounded-full mb-14 text-[12px] tracking-[0.28em] font-light"
+          <div className="section-reveal section-reveal-d1 inline-flex items-center gap-2 px-5 py-2 rounded-full mb-14 text-[14px] tracking-[0.28em] font-light"
             style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", color: "rgba(170,180,200,0.5)" }}>
-            <Star size={12} className="text-zinc-600" /> 一站式影视AGI
+            <Star size={14} className="text-zinc-600" /> 每个人都是导演
           </div>
           <h1 className="section-reveal section-reveal-d2 text-8xl md:text-[9rem] lg:text-[11rem] font-thin tracking-[0.01em] text-white mb-12 select-none leading-none"
             style={{ textShadow: "0 0 140px rgba(170,175,200,0.2), 0 0 280px rgba(140,150,180,0.08)" }}>

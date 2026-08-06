@@ -129,6 +129,15 @@ const fetchStreamingChat = async (payload: any, onChunk?: (text: string) => void
   }
 };
 
+// ★ 辅助：从 last timeSegment 提取总时长（"6-11s" → 11）
+const parseDurationFromLastTS = (segments: any[]): number => {
+  if (!segments?.length) return 5;
+  const last = segments[segments.length - 1];
+  if (!last.time) return 5;
+  const match = String(last.time).match(/(\d+)(?:\s*s)?$/);
+  return match ? parseInt(match[1]) : 5;
+};
+
 // ★ 辅助：合并多个 AbortSignal
 const combineAbortSignals = (...signals: AbortSignal[]): AbortSignal => {
   const controller = new AbortController();
@@ -808,7 +817,31 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
           if (start !== -1 && end !== -1 && end >= start) cleanJson1 = raw1.substring(start, end + 1);
       }
       
-      const json1 = JSON.parse(cleanJson1.trim());
+      // ★ JSON 修复兜底：LLM 偶尔输出畸形 JSON（尾逗号/未转义引号/注释等），先尝试直接解析，失败则逐层修复
+      let json1: any;
+      try {
+          json1 = JSON.parse(cleanJson1.trim());
+      } catch {
+          // 修复 1：移除尾逗号
+          let fixed = cleanJson1.replace(/,\s*([}\]])/g, '$1');
+          try { json1 = JSON.parse(fixed.trim()); } catch {
+              // 修复 2：移除 JS 注释
+              fixed = fixed.replace(/\/\/[^\n]*\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '');
+              try { json1 = JSON.parse(fixed.trim()); } catch {
+                  // 修复 3：尝试用正则提取 shots 数组
+                  const shotsMatch = cleanJson1.match(/"shots"\s*:\s*(\[[\s\S]*\])/);
+                  if (shotsMatch) {
+                      fixed = '{ "shots": ' + shotsMatch[1] + ' }';
+                      try { json1 = JSON.parse(fixed.trim()); } catch {
+                          throw new Error("JSON修复失败，模型返回数据格式异常");
+                      }
+                  } else {
+                      throw new Error("JSON修复失败，模型返回数据格式异常");
+                  }
+              }
+          }
+      }
+
       if (!json1.shots) throw new Error("大模型返回的数据缺少 shots 字段");
 
       // ==========================================
@@ -900,7 +933,12 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
         
         const timeSegmentsText = (shot.timeSegments || []).map((ts: any, i: number) => `【时序段 ${i + 1}】${ts.time}：${ts.action}`).join('\n');
         
-        const fullVideoPrompt = `时长：${shot.duration || 5}s\n场景：${shot.scene || '未知'} / 出场人物：${shot.characters || '无'}\n\n画面主体（包含场景变化等等）：\n${timeSegmentsText}\n\n音效与台词设计：\n* 音效：${shot.soundDesign?.audio || '无'}\n* 台词：${shot.soundDesign?.dialogue || '无'}\n\n每个时间段的机位规则：\n${shot.cameraRules || '无'}\n\n全局约束：\n* 禁止：字幕、BGM、人物滤镜，完美人物，画面闪烁，人物漂移，手部畸形。\n* 通用基础约束：Photorealistic film still look, cinematic lighting, not 3D render, not CGI, not anime, no subtitles, no watermark, organic film noise.\n* 角色肤质约束：[粗糙皮肤，可见毛孔，细微绒毛，皮肤瑕疵，明显细纹，1:1真实肤色]`;
+        // ★ 从 last timeSegment 的 time 字段提取总时长（如 "6-11s" → 11）
+        const actualDuration = parseDurationFromLastTS(shot.timeSegments);
+
+        const oneTakePrefix = shot.oneTake ? `🎬 ${shot.oneTake}\n\n` : '';
+
+        const fullVideoPrompt = `${oneTakePrefix}时长：${actualDuration}s\n场景：${shot.scene || '未知'} / 出场人物：${shot.characters || '无'}\n\n画面主体（包含场景变化等等）：\n${timeSegmentsText}\n\n音效与台词设计：\n* 音效：${shot.soundDesign?.audio || '无'}\n* 台词：${shot.soundDesign?.dialogue || '无'}\n\n全局约束：\n* 禁止：字幕、BGM、人物滤镜，完美人物，画面闪烁，人物漂移，手部畸形。\n* 通用基础约束：Photorealistic film still look, cinematic lighting, not 3D render, not CGI, not anime, no subtitles, no watermark, organic film noise.\n* 角色肤质约束：[粗糙皮肤，可见毛孔，细微绒毛，皮肤瑕疵，明显细纹，1:1真实肤色]`;
 
         // ✨ 裂变默认继承联动机制：新生成的 ShotNode 默认带上中控的 globalRatio 与 globalPromptSuffix
         const globalSettings = useAppStore.getState().canvasSettings;
@@ -926,7 +964,8 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
             status: 'draft', 
             referenceImage: null,
             wordCount: shot.wordCount || 0,
-            duration: shot.duration || 5,
+            duration: parseDurationFromLastTS(shot.timeSegments),
+            oneTake: shot.oneTake || null,
             
             // 记录原始 Prompt 与 已追加后缀印记，防套娃污染
             originalFirstFrameAnchor: shot.imagePrompt || "空镜头。",
@@ -980,10 +1019,10 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       useAppStore.getState().setToastMsg(`✅ 裂变成功！已生成 ${fissionResult.shots.length} 个分镜卡片。`);
 
     } catch (error: any) {
-      console.error("裂变解析错误:", error);
       useAppStore.getState().setFissionProgress({ status: 'idle', phase: '' }); // ★ 重置进度条
-      // ★ AbortError 是用户主动中止，不报错；其他错误正常显示 Toast
+      // ★ AbortError 是用户主动中止，不报错不输出控制台；其他错误正常显示
       if (error?.name !== 'AbortError') {
+        console.error("[裂变解析错误]", error);
         useAppStore.getState().setToastMsg(`裂变失败: ${error.message || '模型返回数据异常'}`);
       }
     } finally {
