@@ -354,7 +354,11 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
   const { updateNodeData, setNodes, setEdges, getNodes, getEdges } = useReactFlow();
   const [selectedText, setSelectedText] = useState("");
   const [selectionRange, setSelectionRange] = useState({ start: 0, end: 0 });
-  
+
+  // ★ 分镜方法记忆（持久化到云端，下次框选文本时自动恢复上次选择）
+  const fissionMethod = useAppStore(s => s.canvasSettings?.fissionMethod || 'general');
+  const setCanvasSettings = useAppStore(s => s.setCanvasSettings);
+
   const [showBookmarks, setShowBookmarks] = useState(false);
   const [extractingAsset, setExtractingAsset] = useState<string | null>(null); // ✨ 新增：控制资产表格提取状态
   const [showAssetMenu, setShowAssetMenu] = useState(false); // ✨ 新增：控制提取菜单
@@ -936,9 +940,26 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
         // ★ 从 last timeSegment 的 time 字段提取总时长（如 "6-11s" → 11）
         const actualDuration = parseDurationFromLastTS(shot.timeSegments);
 
-        const oneTakePrefix = shot.oneTake ? `🎬 ${shot.oneTake}\n\n` : '';
-
-        const fullVideoPrompt = `${oneTakePrefix}时长：${actualDuration}s\n场景：${shot.scene || '未知'} / 出场人物：${shot.characters || '无'}\n\n画面主体（包含场景变化等等）：\n${timeSegmentsText}\n\n音效与台词设计：\n* 音效：${shot.soundDesign?.audio || '无'}\n* 台词：${shot.soundDesign?.dialogue || '无'}\n\n全局约束：\n* 禁止：字幕、BGM、人物滤镜，完美人物，画面闪烁，人物漂移，手部畸形。\n* 通用基础约束：Photorealistic film still look, cinematic lighting, not 3D render, not CGI, not anime, no subtitles, no watermark, organic film noise.\n* 角色肤质约束：[粗糙皮肤，可见毛孔，细微绒毛，皮肤瑕疵，明显细纹，1:1真实肤色]`;
+        const fullVideoPrompt = [
+          `时长：${actualDuration}s`,
+          `场景：${shot.scene || '未知'}`,
+          `出场人物：${shot.characters || '无'}`,
+          '',
+          `空间布局：`,
+          shot.spatialLayout || '无',
+          '',
+          `光影：`,
+          shot.shotLighting || '无',
+          ...(shot.cameraRules ? ['', `机位：`, shot.cameraRules] : []),
+          ...(shot.oneTake ? ['', shot.oneTake] : []),
+          '',
+          '时序演进：',
+          timeSegmentsText,
+          '',
+          `音效：`,
+          shot.soundDesign?.audio || '无',
+          ...(shot.dialogueRequirements ? ['', `对白要求：`, shot.dialogueRequirements] : []),
+        ].join('\n');
 
         // ✨ 裂变默认继承联动机制：新生成的 ShotNode 默认带上中控的 globalRatio 与 globalPromptSuffix
         const globalSettings = useAppStore.getState().canvasSettings;
@@ -966,6 +987,9 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
             wordCount: shot.wordCount || 0,
             duration: parseDurationFromLastTS(shot.timeSegments),
             oneTake: shot.oneTake || null,
+            spatialLayout: shot.spatialLayout || '',
+            cameraRules: shot.cameraRules || '',
+            dialogueRequirements: shot.dialogueRequirements || '',
             
             // 记录原始 Prompt 与 已追加后缀印记，防套娃污染
             originalFirstFrameAnchor: shot.imagePrompt || "空镜头。",
@@ -1310,34 +1334,76 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       )}
 
 
-      {/* 下方的场记板拦截舱 (直接无脑裂变版) */}
-      <div className={`absolute bottom-[-20px] left-1/2 -translate-x-1/2 translate-y-full flex flex-col bg-[#0a0a0c]/95 backdrop-blur-3xl border border-white/[0.1] rounded-[24px] shadow-[0_40px_100px_rgba(0,0,0,0.95)] transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] z-[100] ${(!data.globalCamera || selectedText ? 'w-auto p-1.5 flex-row items-center gap-2 scale-100 opacity-100' : 'scale-90 opacity-0 pointer-events-none')}`}>
-         {!data.globalCamera ? (
+      {/* 分镜方法横向选择栏（黑色液态玻璃风格） */}
+      <div className={`absolute bottom-[-20px] left-0 right-0 translate-y-full bg-[#0a0a0c]/95 backdrop-blur-3xl border border-white/[0.08] rounded-[20px] shadow-[0_40px_100px_rgba(0,0,0,0.95)] transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] z-[100] ${(!data.globalCamera || selectedText ? 'px-5 py-3 scale-100 opacity-100' : 'scale-90 opacity-0 pointer-events-none')} ${!data.globalCamera ? 'flex justify-center' : ''}`}>
+        {!data.globalCamera ? (
           <>
-            <button onClick={handleExtractCamera} disabled={data.isExtractingCamera} className="flex items-center justify-center gap-2 px-5 py-2 bg-indigo-500 text-white hover:bg-indigo-400 rounded-[12px] text-[12px] font-bold transition-all shadow-[0_0_20px_rgba(99,102,241,0.4)] whitespace-nowrap nodrag">
-               {data.isExtractingCamera ? <Loader2 size={14} className="animate-spin" /> : <Settings2 size={14} />} 锚定全片摄影机
+            <button onClick={handleExtractCamera} disabled={data.isExtractingCamera} className="flex items-center justify-center gap-2 px-5 py-2 bg-white/[0.06] border border-white/[0.08] hover:bg-white/[0.1] text-zinc-200 rounded-[12px] text-[12px] font-semibold transition-all whitespace-nowrap nodrag">
+              {data.isExtractingCamera ? <Loader2 size={14} className="animate-spin" /> : <Settings2 size={14} />} 锚定全片摄影机
             </button>
           </>
         ) : (
-          <>
-            {/* ★ LLM 模型选择已移至左侧中控台统一管理，确保在任何步骤下都能切换模型 */}
-            
-            {/* ★ 新增：按集选择入口（不覆盖原有手动划选功能） */}
+          <div className="flex items-center gap-4">
+            {/* ★ 按集选择 - 独立入口 */}
             <button
               onClick={() => { getOrOpenEpisodeSelect('fission'); }}
               disabled={data.isGenerating}
-              className="flex items-center gap-1.5 px-3 py-2 text-[12px] font-medium text-indigo-400/80 bg-indigo-500/10 border border-indigo-500/20 hover:bg-indigo-500/20 hover:text-indigo-300 rounded-[12px] transition-all nodrag whitespace-nowrap"
+              className="flex items-center gap-1.5 px-4 py-2 text-[12px] font-medium text-zinc-300 bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.08] hover:text-white rounded-[12px] transition-all whitespace-nowrap nodrag"
             >
               📋 按集选择
             </button>
 
-            <button onClick={handleFissionShots} disabled={data.isGenerating} className="flex items-center gap-1.5 px-6 py-2 text-[12px] font-bold text-white bg-indigo-500 hover:bg-indigo-400 rounded-[12px] transition-all shadow-[0_0_20px_rgba(99,102,241,0.5)] nodrag whitespace-nowrap">
-              {data.isGenerating ? <Loader2 size={14} className="animate-spin" /> : <Layers size={14} />} 裂变分镜 ({selectedText.length}字)
-            </button>
-            <button onClick={handleFissionTable} disabled={data.isGenerating} className="flex items-center gap-1.5 px-6 py-2 text-[12px] font-bold text-black bg-white hover:bg-zinc-200 hover:scale-105 rounded-[12px] transition-all shadow-[0_0_15px_rgba(255,255,255,0.3)] nodrag whitespace-nowrap">
-              {data.isGenerating ? <Loader2 size={14} className="animate-spin" /> : <Table size={14} />} 生成表格
-            </button>
-          </>
+            {/* ★ 分界线 */}
+            <div className="w-px h-6 bg-white/[0.06]" />
+
+            {/* ★ 4 种分镜方法标签 */}
+            <div className="flex items-center gap-1">
+              {([
+                { key: 'general' as const, Icon: Layers, label: '通用分镜', isImplemented: true, subtitle: selectedText.length > 0 ? `${selectedText.length}字·点击执行` : undefined },
+                { key: 'long15s' as const, Icon: Film, label: '15s', isImplemented: false, subtitle: '功能即将上线' },
+                { key: 'long30s' as const, Icon: Film, label: '30s', isImplemented: false, subtitle: '功能即将上线' },
+                { key: 'table' as const, Icon: Table, label: '表格分镜', isImplemented: false, subtitle: '功能即将上线' },
+              ]).map(m => {
+                const isActive = fissionMethod === m.key;
+                return (
+                  <button
+                    key={m.key}
+                    onClick={() => {
+                      if (isActive) {
+                        // ★ 已选中该分镜方法 → 直接执行
+                        if (m.isImplemented) {
+                          // ★ 通用分镜：调用现有裂变逻辑
+                          if (m.key === 'general') handleFissionShots();
+                          // ★ 未来其他已实现方法在此接入
+                        } else {
+                          useAppStore.getState().setToastMsg(`⏳ ${m.label}分镜即将上线`);
+                        }
+                      } else {
+                        // ★ 切换到此方法（记住偏好，下次默认出现此方法）
+                        setCanvasSettings((prev: any) => ({ ...prev, fissionMethod: m.key }));
+                        if (!m.isImplemented) useAppStore.getState().setToastMsg(`⏳ 已切换至「${m.label}」，功能即将上线`);
+                      }
+                    }}
+                    disabled={data.isGenerating}
+                    className={`flex flex-col items-center gap-0.5 px-4 py-2 rounded-[14px] transition-all text-[12px] font-semibold whitespace-nowrap nodrag ${
+                      isActive
+                        ? m.isImplemented
+                          ? 'bg-white/[0.06] text-white border-b-2 border-white/30 rounded-b-[8px]'
+                          : 'bg-white/[0.03] text-zinc-400 border-b-2 border-white/15 rounded-b-[8px]'
+                        : m.isImplemented
+                          ? 'bg-transparent text-zinc-400 hover:text-white hover:bg-white/[0.04] border-b-2 border-transparent'
+                          : 'text-zinc-600/40 hover:text-zinc-500 hover:bg-white/[0.02] border-b-2 border-transparent'
+                    }`}
+                  >
+                    <span className="flex items-center gap-1.5"><m.Icon size={13} />{m.label}</span>
+                    {isActive && m.subtitle && (
+                      <span className={`text-[10px] font-normal ${m.isImplemented ? 'text-zinc-500' : 'text-zinc-600/50'}`}>{m.subtitle}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         )}
       </div>
     </div>
