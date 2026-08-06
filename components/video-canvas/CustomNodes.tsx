@@ -958,7 +958,7 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
           '',
           `音效：`,
           shot.soundDesign?.audio || '无',
-          ...(shot.dialogueRequirements ? ['', `对白要求：`, shot.dialogueRequirements] : []),
+          ...(shot.dialogueRequirements && typeof shot.dialogueRequirements === 'object' ? ['', `对白要求：`, ...Object.entries(shot.dialogueRequirements).map(([role, desc]: [string, any]) => `* ${role}：${desc}`)] : []),
         ].join('\n');
 
         // ✨ 裂变默认继承联动机制：新生成的 ShotNode 默认带上中控的 globalRatio 与 globalPromptSuffix
