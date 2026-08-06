@@ -186,21 +186,25 @@ export default function EpisodeSelectModal({
 
     if (selected.length === 0) return;
 
-    // 用 preview 文本在原文中定位，粗切割各段落
+    // 用 preview 文本在原文中定位，粗切割各段落。
+    // 这里只做稳定的原文切片，不做任何语义改写，避免把剧情拼乱或丢失。
     const textParts: string[] = [];
     const fullText = scriptText;
+    const normalizedFullText = fullText.replace(/\s+/g, "");
 
     for (let i = 0; i < selected.length; i++) {
       const ep = selected[i];
-      // 取 preview 前30非空白字作为搜索锚点
-      const anchor = ep.preview.replace(/\s+/g, "").substring(0, 25);
+      // 取 preview 前40个非空白字作为搜索锚点，降低短预览命中偏差。
+      const anchor = ep.preview.replace(/\s+/g, "").substring(0, 40);
 
       if (!anchor) continue;
 
       // 在去掉空白后的文本中找锚点
-      const strippedText = fullText.replace(/\s+/g, "");
-      const anchorIdx = strippedText.indexOf(anchor);
-      if (anchorIdx === -1) continue; // 找不到锚点 → 跳过此段落
+      const anchorIdx = normalizedFullText.indexOf(anchor);
+      if (anchorIdx === -1) {
+        // 找不到锚点时，不直接回退整段；优先保留原有已命中的段落，避免把段落边界全部冲掉。
+        continue;
+      }
 
       // 把 strippedText 索引映射回原文索引
       let charCount = 0;
@@ -219,8 +223,8 @@ export default function EpisodeSelectModal({
       // 段落结束位置 = 下一段落的锚点位置（或文本末尾）
       let originalEnd = fullText.length;
       if (i < selected.length - 1) {
-        const nextAnchor = selected[i + 1].preview.replace(/\s+/g, "").substring(0, 25);
-        const nextAnchorIdx = strippedText.indexOf(nextAnchor, anchorIdx + 1);
+        const nextAnchor = selected[i + 1].preview.replace(/\s+/g, "").substring(0, 40);
+        const nextAnchorIdx = normalizedFullText.indexOf(nextAnchor, anchorIdx + 1);
         if (nextAnchorIdx !== -1) {
           let nextCharCount = 0;
           for (let j = 0; j < fullText.length; j++) {
@@ -239,7 +243,8 @@ export default function EpisodeSelectModal({
       if (epText) textParts.push(epText);
     }
 
-    // 降级：如果所有段落都找不到锚点 → 整段脚本
+    // 降级：如果所有段落都找不到锚点 → 整段脚本。
+    // 这是最后兜底，不参与正常拼接路径。
     const resultText = textParts.length > 0
       ? textParts.join("\n\n")
       : scriptText;

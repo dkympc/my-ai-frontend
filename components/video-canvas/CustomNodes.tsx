@@ -135,13 +135,17 @@ const fetchStreamingChat = async (payload: any, onChunk?: (text: string) => void
   }
 };
 
-// ★ 辅助：从 last timeSegment 提取总时长（"6-11s" → 11）
+// ★ 辅助：从 last timeSegment 提取总时长。
+// 这里优先取区间末尾秒数（如 6-11s → 11），如果只有单点秒数就直接取该秒数。
 const parseDurationFromLastTS = (segments: any[]): number => {
   if (!segments?.length) return 5;
   const last = segments[segments.length - 1];
   if (!last.time) return 5;
-  const match = String(last.time).match(/(\d+)(?:\s*s)?$/);
-  return match ? parseInt(match[1]) : 5;
+  const timeText = String(last.time).trim();
+  const rangeMatch = timeText.match(/-(\d+)\s*s?$/);
+  if (rangeMatch) return parseInt(rangeMatch[1], 10);
+  const pointMatch = timeText.match(/^(\d+)\s*s?$/);
+  return pointMatch ? parseInt(pointMatch[1], 10) : 5;
 };
 
 // ★ 辅助：合并多个 AbortSignal
@@ -1163,7 +1167,48 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
 
         newNodes.push(newShot);
         newEdges.push(newEdge);
+
+        // 如果模型仍给出超长单镜，做节点层安全拆分，避免画布上出现一个塞满内容的长镜头卡片。
+        if (rawDuration > 15) {
+          const splitShotId = `shot_${Date.now()}_${index}_split`;
+          const splitTargetY = targetY + 280;
+          const splitSegments = Array.isArray(shot.timeSegments) && shot.timeSegments.length > 1
+            ? shot.timeSegments.slice(1)
+            : shot.timeSegments;
+          const splitDuration = Math.max(3, rawDuration - 10);
+
+          newNodes.push({
+            id: splitShotId,
+            type: 'shot',
+            position: { x: targetColumnX, y: splitTargetY },
+            data: {
+              ...newShot.data,
+              shotNumber: `${newShot.data.shotNumber}B`,
+              scriptText: shot.scriptFragment || selectedText,
+              duration: Math.min(15, splitDuration),
+              timeSegments: splitSegments,
+              firstFrameAnchor: shot.imagePrompt || "空镜头。",
+              videoPrompt: finalVideoPromptText,
+              isParsing: false
+            }
+          });
+          newEdges.push({
+            id: `e-${id}-${splitShotId}`,
+            source: id,
+            target: splitShotId,
+            sourceHandle: 'right',
+            targetHandle: 'left',
+            type: 'default',
+            animated: true,
+            style: { stroke: 'rgba(255, 255, 255, 0.2)', strokeWidth: 1.5, strokeDasharray: '8 8', animationDuration: '10s' }
+          });
+          createdShotIds.push(splitShotId);
+        }
       });
+
+      if (newNodes.length === 0) {
+        throw new Error('模型返回了空分镜结果，未生成任何节点');
+      }
 
       setNodes((nds) => [...nds, ...newNodes]);
       setEdges((eds) => [...eds, ...newEdges]);
