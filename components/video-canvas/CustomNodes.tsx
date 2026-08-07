@@ -70,9 +70,16 @@ const forceDownload = async (url: string, filename: string) => {
 // 改动：统一走 fetchApi，享受 401/402/403 全局拦截 + API_BASE 前缀 + 统一 Auth
 // ★ 新增 AbortSignal 支持 + 5 分钟超时兜底，防止 SSE 流挂起导致按钮永久转圈
 const fetchStreamingChat = async (payload: any, onChunk?: (text: string) => void, signal?: AbortSignal, onThinking?: () => void, onConnected?: () => void): Promise<string> => {
-  // ★ 超时 AbortController：8 分钟兜底，防止 SSE 流永久挂起（分镜裂变 Prompt 较长，需要更宽松的超时）
+  // ★ 分阶段超时策略：分镜裂变给更长的容忍时间，其它画布流式请求维持更保守的边界
+  const promptType = String(payload?.prompt_type || '');
+  const timeoutMs = promptType === 'fission-stage1'
+    ? 16 * 60 * 1000
+    : promptType === 'fission-stage2'
+      ? 12 * 60 * 1000
+      : 8 * 60 * 1000;
   const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(), 8 * 60 * 1000);
+  const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
+  let abortLogger: ((this: AbortSignal, ev: Event) => any) | null = null;
 
   // ★ 合并外部 signal 和超时 signal：任一触发即 abort
   const combinedSignal = signal
@@ -82,6 +89,24 @@ const fetchStreamingChat = async (payload: any, onChunk?: (text: string) => void
   try {
     const requestBody = { ...payload, _source: 'canvas', stream: true };
     console.log('[DEBUG][fetchStreamingChat] 发送请求体:', JSON.stringify({ model: requestBody.model, reasoning_effort: requestBody.reasoning_effort, thinking: requestBody.thinking, temperature: requestBody.temperature, prompt_type: requestBody.prompt_type, stream: requestBody.stream, userLen: (requestBody.user_content || '').length }, null, 2));
+    console.log('[Canvas Stream Debug] 请求开始:', {
+      model: requestBody.model,
+      prompt_type: requestBody.prompt_type,
+      userLen: (requestBody.user_content || '').length,
+      hasThinking: !!requestBody.thinking,
+      hasReasoningEffort: !!requestBody.reasoning_effort,
+      timeoutMs
+    });
+
+    abortLogger = () => {
+      console.warn('[Canvas Stream Debug] 收到 abort 信号:', {
+        byOuterSignal: !!signal?.aborted,
+        byTimeout: timeoutController.signal.aborted,
+        outerReason: (signal as any)?.reason,
+        timeoutReason: (timeoutController.signal as any)?.reason
+      });
+    };
+    combinedSignal?.addEventListener('abort', abortLogger, { once: true });
 
     const fetchOptions: any = {
       method: 'POST',
@@ -104,11 +129,19 @@ const fetchStreamingChat = async (payload: any, onChunk?: (text: string) => void
     const decoder = new TextDecoder();
     let fullText = '';
     let buffer = '';
+    let firstChunkLogged = false;
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
+      if (!firstChunkLogged) {
+        firstChunkLogged = true;
+        console.log('[Canvas Stream Debug] 收到首个流块:', {
+          bytes: value?.byteLength || 0,
+          bufferPreview: buffer.slice(0, 200)
+        });
+      }
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
       for (const line of lines) {
@@ -129,8 +162,14 @@ const fetchStreamingChat = async (payload: any, onChunk?: (text: string) => void
       }
     }
 
+    console.log('[Canvas Stream Debug] 流正常结束:', {
+      finalLength: fullText.length,
+      finalPreview: fullText.slice(0, 200),
+      prompt_type: requestBody.prompt_type
+    });
     return fullText;
   } finally {
+    if (abortLogger) combinedSignal?.removeEventListener('abort', abortLogger as EventListener);
     clearTimeout(timeoutId);
   }
 };
@@ -799,6 +838,17 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       // ==========================================
       // 🚀 工业级管道 1: 视频分镜拆解 (100% 满血还原，绝不删减)
       // ==========================================
+      console.log('[Canvas Fission Debug] Stage 1 start', {
+        nodeId: id,
+        model: targetModel,
+        selectedTextLength: selectedText?.length || 0,
+        fullTextLength: data.text?.length || 0,
+        isFullScript: !selectedText || selectedText.trim() === (data.text || '').trim(),
+        existingShotsCount: existingShots.length,
+        directorEnabled: !!directorCtx,
+        directorGenre: canvasSettings?.directorGenre || 'default',
+        directorTempo: canvasSettings?.directorTempo || ''
+      });
       // ★ 用顶部进度条替代 Toast 显示 LLM 原始输出
       useAppStore.getState().setFissionProgress({ status: 'stage1', phase: '分镜拆解中...', mode: 'generating' });
       const payloadStage1 = {
@@ -882,6 +932,10 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       );
       clearInterval(phase1Interval);
       if (!raw1) throw new Error("阶段1：LLM未返回有效内容");
+      console.log('[Canvas Fission Debug] Stage 1 raw1 received', {
+        length: raw1.length,
+        preview: raw1.slice(0, 500)
+      });
       let cleanJson1 = raw1;
       const match1 = raw1.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
       if (match1) {
@@ -891,6 +945,11 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
           const end = raw1.lastIndexOf('}');
           if (start !== -1 && end !== -1 && end >= start) cleanJson1 = raw1.substring(start, end + 1);
       }
+      console.log('[Canvas Fission Debug] Stage 1 cleaned JSON candidate', {
+        length: cleanJson1.length,
+        hasCodeFence: !!match1,
+        preview: cleanJson1.slice(0, 500)
+      });
       
       // ★ JSON 修复兜底：LLM 偶尔输出畸形 JSON（尾逗号/未转义引号/注释等），先尝试直接解析，失败则逐层修复
       let json1: any;
@@ -962,6 +1021,12 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       }
 
       if (!json1.shots) throw new Error("大模型返回的数据缺少 shots 字段");
+      console.log('[Canvas Fission Debug] Stage 1 parsed shots', {
+        shotsCount: json1.shots.length,
+        firstShotNumber: json1.shots[0]?.shotNumber,
+        lastShotNumber: json1.shots[json1.shots.length - 1]?.shotNumber,
+        shotNumbers: json1.shots.slice(0, 10).map((s: any) => s.shotNumber)
+      });
       // ★★★ 诊断日志：检查 Stage 1 输出的 shotLighting 是否含约束文本
       const taintedShots = json1.shots.filter((s: any) => s.shotLighting?.includes('Photorealistic') || s.shotLighting?.includes('粗糙皮肤'));
       if (taintedShots.length > 0) {
@@ -1009,6 +1074,10 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
         if (typeof phase2Interval !== 'undefined') clearInterval(phase2Interval);
         
         if (raw2) {
+          console.log('[Canvas Fission Debug] Stage 2 raw2 received', {
+            length: raw2.length,
+            preview: raw2.slice(0, 500)
+          });
           let cleanJson2 = raw2;
           const match2 = raw2.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
           if (match2) {
@@ -1018,10 +1087,17 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
               const end = raw2.lastIndexOf('}');
               if (start !== -1 && end !== -1 && end >= start) cleanJson2 = raw2.substring(start, end + 1);
           }
-          json2 = JSON.parse(cleanJson2.trim());
+          const normalizedJson2 = cleanJson2
+            .trim()
+            .replace(/^```(?:json)?\s*/i, '')
+            .replace(/\s*```$/i, '');
+          json2 = JSON.parse(normalizedJson2);
         }
       } catch (err: any) {
-        console.error('[Canvas Stage 2 Error] - 首帧提取非致命失败，降级使用默认图说明:', err);
+        console.error('[Canvas Stage 2 Error] - 原因是：首帧提取非致命失败，已降级使用默认图说明', {
+          message: err?.message,
+          preview: typeof raw2 === 'string' ? raw2.slice(0, 500) : '',
+        }, err);
       } finally {
         if (typeof phase2Interval !== 'undefined') clearInterval(phase2Interval);
       }
@@ -1035,6 +1111,19 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
           imagePrompt: json2.imagePrompts?.[idx] || "待生成静态提示词"
         }))
       };
+      console.log('[Canvas Fission Debug] Stage 1 + Stage 2 merged result', {
+        mergedShotsCount: fissionResult.shots.length,
+        firstShot: fissionResult.shots[0] ? {
+          shotNumber: fissionResult.shots[0].shotNumber,
+          hasImagePrompt: !!fissionResult.shots[0].imagePrompt,
+          hasSpatialLayout: !!fissionResult.shots[0].spatialLayout,
+          hasShotLighting: !!fissionResult.shots[0].shotLighting
+        } : null,
+        lastShot: fissionResult.shots.length > 0 ? {
+          shotNumber: fissionResult.shots[fissionResult.shots.length - 1].shotNumber,
+          hasImagePrompt: !!fissionResult.shots[fissionResult.shots.length - 1].imagePrompt
+        } : null
+      });
 
       const thisNode = getNodes().find(n => n.id === id);
       const baseX = thisNode ? thisNode.position.x : 0;
@@ -1210,6 +1299,13 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
         throw new Error('模型返回了空分镜结果，未生成任何节点');
       }
 
+      console.log('[Canvas Fission Debug] Nodes ready to render', {
+        newNodesCount: newNodes.length,
+        newEdgesCount: newEdges.length,
+        createdShotIds,
+        targetColumnX,
+        maxBottomY
+      });
       setNodes((nds) => [...nds, ...newNodes]);
       setEdges((eds) => [...eds, ...newEdges]);
       
@@ -1233,7 +1329,7 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       useAppStore.getState().setFissionProgress({ status: 'idle', phase: '', mode: 'generating' }); // ★ 重置进度条
       // ★ AbortError 是用户主动中止，不报错不输出控制台；其他错误正常显示
       if (error?.name !== 'AbortError') {
-        console.error("[裂变解析错误]", error);
+        console.error("[Canvas Fission Error] - 原因是：裂变解析或渲染失败", error);
         useAppStore.getState().setToastMsg(`裂变失败: ${error.message || '模型返回数据异常'}`);
       }
     } finally {
