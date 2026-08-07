@@ -40,8 +40,8 @@ interface WorkspaceProps {
     videoHistory: VideoRecord[];
 }
   
-import { MediaNode, TextNode, RenderNode, CombineNode, MasterScriptNode, ShotNode, VideoClipNode, ScriptTableNode, AssetTableNode } from './CustomNodes';
-const nodeTypes = { media: MediaNode, text: TextNode, render: RenderNode, combine: CombineNode, masterScript: MasterScriptNode, shot: ShotNode, videoClip: VideoClipNode, scriptTable: ScriptTableNode, assetTable: AssetTableNode };
+import { MediaNode, TextNode, RenderNode, CombineNode, MasterScriptNode, ShotNode, VideoClipNode, ScriptTableNode, AssetTableNode, PanoramaNode } from './CustomNodes';
+const nodeTypes = { media: MediaNode, text: TextNode, render: RenderNode, combine: CombineNode, masterScript: MasterScriptNode, shot: ShotNode, videoClip: VideoClipNode, scriptTable: ScriptTableNode, assetTable: AssetTableNode, panorama: PanoramaNode };
 
 // ✨ 自定义可悬停删除的连线组件
 function DeletableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, markerEnd }: any) {

@@ -1,14 +1,36 @@
-﻿import React, { useState, useRef, useEffect, useMemo } from 'react';
+﻿import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom'; // ✨ 新增：用于渲染悬浮顶层的禅定舱
 import { Handle, Position, useReactFlow, NodeResizeControl, useEdges, useNodes } from '@xyflow/react';
 import { 
   Image as ImageIcon, Film, Type, Sparkles, ChevronDown, MoveUp, Scaling, Loader2, Layers, CheckCircle,
   Maximize, Wand2, Grid, UserRound, PenTool, Eraser, RefreshCcw, Download, Subtitles, Scissors, AudioWaveform, RotateCcw,
-  Upload, Trash2, Play, ArrowRight, ArrowDown, Settings2, CheckSquare, Clapperboard, X, Table, Plus, Expand, Database, Map, Users, Package, MoreHorizontal, Copy
+  Upload, Trash2, Play, ArrowRight, ArrowDown, Settings2, CheckSquare, Clapperboard, X, Table, Plus, Expand, Database, Map, Users, Package, MoreHorizontal, Copy, Globe
 } from 'lucide-react';
 import { fetchApi } from '@/services/api';
 import { DirectorRouter } from '@/lib/director-rules';
 import EpisodeSelectModal from './EpisodeSelectModal';
+import dynamic from 'next/dynamic';
+
+// ★ 全景查看器：动态导入避免 SSR 时加载 Three.js
+const PanoramaViewer = dynamic(() => import('./PanoramaViewer'), { ssr: false });
+
+// ★★★ 通用 Hook：读取图片/视频原始宽高比
+// 用于所有节点自适应展示，消除黑边，不拉伸变形
+function useMediaDimensions(url?: string) {
+  const [dims, setDims] = useState<{ width: number; height: number } | null>(null);
+  useEffect(() => {
+    if (!url) { setDims(null); return; }
+    let cancelled = false;
+    // 视频文件跳过（用 video 标签读取太慢）
+    if (/\.(mp4|webm|mov|avi)$/i.test(url)) { setDims(null); return; }
+    const img = new Image();
+    img.onload = () => { if (!cancelled) setDims({ width: img.naturalWidth, height: img.naturalHeight }); };
+    img.onerror = () => { if (!cancelled) setDims(null); };
+    img.src = url;
+    return () => { cancelled = true; };
+  }, [url]);
+  return dims;
+}
 
 // ★ 画布 LLM 模型白名单（与 constants.tsx MODELS 同步，用于过滤掉生图/生视频模型）
 const LLM_MODEL_IDS = ['deepseek-v4-pro', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gemini-3.1-pro-preview', 'gemini-3.5-flash', 'gemini-3.6-flash', 'kimi-k2.6', 'claude-haiku-4-5-20251001-thinking'];
@@ -1713,6 +1735,47 @@ export const MasterScriptNode = React.memo(_MasterScriptNode);
 // ==========================================
 // 2. 独立分镜节点 (ShotNode) —— 双轨质检员 + 参数胶囊
 // ==========================================
+// ★★★ 全景制作辅助函数：从图片/分镜节点创建全景图节点
+// 被 MediaNode 和 ShotNode 的悬浮工具栏「全景制作」按钮调用
+const handleCreatePanorama = (sourceId: string, sourceData: any, getNodes: any, setNodes: any, setEdges: any) => {
+  const sourceNode = getNodes().find((n: any) => n.id === sourceId);
+  if (!sourceNode) return;
+
+  // 取源节点的场景描述和参考图
+  const sourcePrompt = sourceData.firstFrameAnchor || sourceData.prompt || sourceData.videoPrompt || '';
+  const sourceImage = sourceData.resultUrl || sourceData.frameUrl || '';
+
+  // 创建全景图节点，放在源节点右侧
+  const panoramaId = `panorama_${Date.now()}`;
+  const newNode = {
+    id: panoramaId,
+    type: 'panorama',
+    position: { x: sourceNode.position.x + 550, y: sourceNode.position.y },
+    data: {
+      prompt: sourcePrompt,
+      ratio: '21:9', // 全景默认超宽比例
+      model: sourceData.model || '',
+      quality: sourceData.quality || '2K',
+      referenceImage: sourceImage, // 源节点的图片作为参考底图
+      status: 'draft',
+    }
+  };
+
+  // 创建从源节点到全景节点的连线
+  const newEdge = {
+    id: `e-${sourceId}-${panoramaId}-${Date.now()}`,
+    source: sourceId,
+    target: panoramaId,
+    sourceHandle: 'right',
+    targetHandle: 'left',
+    style: { stroke: '#10b981', strokeWidth: 2, strokeDasharray: '5,5' }, // 绿色虚线标识全景连线
+  };
+
+  setNodes((nds: any) => [...nds, newNode]);
+  setEdges((eds: any) => [...eds, newEdge]);
+  useAppStore.getState().setToastMsg('🌐 全景图节点已创建！点击节点内「生成全景图」开始');
+};
+
 const _ShotNode = ({ id, data, selected }: any) => {
   const { updateNodeData, getNodes, setNodes, setEdges, getEdges } = useReactFlow();
   const edges = useEdges(); const nodes = useNodes();
@@ -1741,7 +1804,11 @@ const _ShotNode = ({ id, data, selected }: any) => {
   const imgRef = useRef<HTMLImageElement>(null);
 
   const activeRatio = data.ratio || data.globalRatioOverride || '16:9';
-  const currentStyle = RATIO_ASPECT_ONLY[activeRatio] || RATIO_ASPECT_ONLY['16:9'];
+  // ★ 图片真实比例自适应
+  const shotImageDims = useMediaDimensions(data.frameUrl || data.resultUrl);
+  const currentStyle = shotImageDims
+    ? { width: (RATIO_ASPECT_ONLY[activeRatio] || RATIO_ASPECT_ONLY['16:9']).width, aspectRatio: String(shotImageDims.width / shotImageDims.height) }
+    : (RATIO_ASPECT_ONLY[activeRatio] || RATIO_ASPECT_ONLY['16:9']);
 
   const incomingAssets = useMemo(() => edges.filter(e => e.target === id).map(e => {
     const srcNode = nodes.find(n => n.id === e.source);
@@ -1970,6 +2037,8 @@ const _ShotNode = ({ id, data, selected }: any) => {
           <button onClick={() => setIsAnnotating(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] text-[11px] font-medium text-zinc-400 hover:text-white hover:bg-white/10 transition-colors whitespace-nowrap">
   <PenTool size={12}/> 标注
 </button>
+          <div className="w-px h-4 bg-white/10 mx-1"></div>
+          <button onClick={() => handleCreatePanorama(id, data, getNodes, setNodes, setEdges)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] text-[11px] font-medium text-emerald-400 hover:text-white hover:bg-emerald-500/30 transition-colors whitespace-nowrap"><Globe size={12}/> 全景制作</button>
           <div className="w-px h-4 bg-white/10 mx-1"></div>
           
           <div className="relative group/save flex items-center">
@@ -2276,7 +2345,11 @@ const _VideoClipNode = ({ id, data, selected }: any) => {
   const [showConfig, setShowConfig] = useState(false);
   const [zenMode, setZenMode] = useState<any>(null);
   const activeRatio = data.ratio || data.globalRatioOverride || '16:9';
-  const currentStyle = RATIO_ASPECT_ONLY[activeRatio] || RATIO_ASPECT_ONLY['16:9'];
+  // ★ 视频/图片真实比例自适应
+  const clipImageDims = useMediaDimensions(data.videoUrl || data.resultUrl);
+  const currentStyle = clipImageDims
+    ? { width: (RATIO_ASPECT_ONLY[activeRatio] || RATIO_ASPECT_ONLY['16:9']).width, aspectRatio: String(clipImageDims.width / clipImageDims.height) }
+    : (RATIO_ASPECT_ONLY[activeRatio] || RATIO_ASPECT_ONLY['16:9']);
 
   const incomingAssets = useMemo(() => edges.filter(e => e.target === id).map(e => {
     const srcNode = nodes.find(n => n.id === e.source);
@@ -2678,7 +2751,7 @@ export const VideoClipNode = React.memo(_VideoClipNode);
 // 2. 图像节点 (MediaNode) - 搭载创作者悬浮面板
 // ==========================================
 const _MediaNode = ({ id, data, selected }: any) => {
-  const { updateNodeData, getNodes, setNodes } = useReactFlow();
+  const { updateNodeData, getNodes, setNodes, setEdges } = useReactFlow();
   const edges = useEdges();
   const { enqueueTask } = useCanvasEngine();
   const nodes = useNodes();
@@ -2693,6 +2766,8 @@ const _MediaNode = ({ id, data, selected }: any) => {
   
   const isReferenceOnly = !!data.asset;
   const displayImage = isReferenceOnly ? data.asset.url : data.resultUrl;
+  // ★ 图片真实比例自适应
+  const imageDims = useMediaDimensions(displayImage);
 
   const incomingAssets = useMemo(() => edges.filter(e => e.target === id).map(e => {
     const srcNode = nodes.find(n => n.id === e.source);
@@ -2704,7 +2779,9 @@ const _MediaNode = ({ id, data, selected }: any) => {
     return null;
   }).filter(Boolean), [edges, nodes, id]);
 
-  const currentStyle = data.customAspectRatio
+  const currentStyle = imageDims
+    ? { width: `${data.customWidth || 320}px`, aspectRatio: String(imageDims.width / imageDims.height) }
+    : data.customAspectRatio
     ? { width: `${data.customWidth || 320}px`, aspectRatio: String(data.customAspectRatio) }
     : (MEDIA_RATIO_MAP[data.ratio || '16:9'] || MEDIA_RATIO_MAP['16:9']);
 
@@ -2895,6 +2972,8 @@ const _MediaNode = ({ id, data, selected }: any) => {
           <button onClick={() => showToast("进入九宫格扩展模式")} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] text-[11px] font-medium text-zinc-400 hover:text-white hover:bg-white/10 transition-colors whitespace-nowrap"><Grid size={12}/> 九宫格</button>
           <button onClick={() => showToast("生成人物三视图")} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] text-[11px] font-medium text-zinc-400 hover:text-white hover:bg-white/10 transition-colors whitespace-nowrap"><UserRound size={12}/> 多视图</button>
           <button onClick={() => setIsAnnotating(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] text-[11px] font-medium text-zinc-400 hover:text-white hover:bg-white/10 transition-colors whitespace-nowrap"><PenTool size={12}/> 标注</button>
+          <div className="w-px h-4 bg-white/10 mx-1"></div>
+          <button onClick={() => handleCreatePanorama(id, data, getNodes, setNodes, setEdges)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] text-[11px] font-medium text-emerald-400 hover:text-white hover:bg-emerald-500/30 transition-colors whitespace-nowrap"><Globe size={12}/> 全景制作</button>
           <div className="w-px h-4 bg-white/10 mx-1"></div>
           
           <div className="relative group/save flex items-center">
@@ -3152,7 +3231,11 @@ const _RenderNode = ({ id, data, selected }: any) => {
     return null;
   }).filter(Boolean), [edges, nodes, id]);
 
-  const currentStyle = RENDER_RATIO_MAP[data.ratio || '16:9'] || RENDER_RATIO_MAP['16:9'];
+  // ★ 视频/图片真实比例自适应
+  const renderImageDims = useMediaDimensions(displayVideo);
+  const currentStyle = renderImageDims
+    ? { width: (RENDER_RATIO_MAP[data.ratio || '16:9'] || RENDER_RATIO_MAP['16:9']).width, aspectRatio: String(renderImageDims.width / renderImageDims.height) }
+    : (RENDER_RATIO_MAP[data.ratio || '16:9'] || RENDER_RATIO_MAP['16:9']);
 
   const handleRender = async () => {
     if (data.isGenerating) return;
@@ -3972,3 +4055,303 @@ const _TextNode = ({ id, data, selected }: any) => {
   );
 };
 export const TextNode = React.memo(_TextNode);
+
+// ==========================================
+// 7. 全景图节点 (PanoramaNode) — 360° 场景环境生成与预览
+// ==========================================
+const _PanoramaNode = ({ id, data, selected }: any) => {
+  const { updateNodeData, getNodes, setNodes } = useReactFlow();
+  const edges = useEdges();
+  const nodes = useNodes();
+  const [showFullscreen, setShowFullscreen] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  // 收集入边连线的参考图（用户连线控制参考图来源）
+  const incomingRefs = useMemo(() => edges
+    .filter(e => e.target === id)
+    .map(e => {
+      const src = nodes.find(n => n.id === e.source);
+      return src?.data?.resultUrl || src?.data?.frameUrl || src?.data?.asset?.url || null;
+    })
+    .filter(Boolean), [edges, nodes, id]);
+
+  const displayImage = data.resultUrl || data.frameUrl;
+  const status = data.status || 'draft';
+  const currentModel = data.model || 'gpt-image-2';
+
+  // ★ 切换模型时自动矫正清晰度到该模型支持的档位
+  const handleModelChange = (v: string) => {
+    const opts = getImageQualityOptions(v);
+    const currentQuality = data.quality || '';
+    const isValid = opts.some((o: any) => o.value === currentQuality);
+    updateNodeData(id, { model: v, quality: isValid ? currentQuality : opts[0].value });
+  };
+
+  // ★ 比例映射：有图用图片真实比例，无图用预设宽高比
+  const panoImageDims = useMediaDimensions(displayImage);
+  const panoStyle = useMemo(() => {
+    if (panoImageDims) {
+      return { width: 560, aspectRatio: String(panoImageDims.width / panoImageDims.height) };
+    }
+    const ratio = data.ratio || '21:9';
+    const ratioMap: Record<string, { width: number; aspectRatio: string }> = {
+      '21:9': { width: 560, aspectRatio: '21/9' },
+      '32:9': { width: 640, aspectRatio: '32/9' },
+      '16:9': { width: 480, aspectRatio: '16/9' },
+    };
+    return ratioMap[ratio] || ratioMap['21:9'];
+  }, [panoImageDims, data.ratio]);
+
+  // ★ 全景图生成
+  const handleGenerate = async () => {
+    if (isGenerating || status === 'generating') return;
+    setIsGenerating(true);
+    updateNodeData(id, { status: 'generating' });
+
+    try {
+      // 从后端获取全景图专用提示词
+      let panoramaPrompt = '';
+      try {
+        const promptRes = await fetchApi('/v1/canvas/prompt', {
+          method: 'POST',
+          body: JSON.stringify({ prompt_type: 'panorama-gen', raw: true }),
+        });
+        const promptData = await promptRes.json();
+        panoramaPrompt = promptData.prompt || '';
+      } catch (e) {
+        console.warn('[PanoramaNode] 获取全景提示词失败，使用内置兜底:', e);
+      }
+
+      // 拼接最终 prompt：用户场景描述 + 全景图制作提示词
+      const userPrompt = data.prompt || '';
+      const finalPrompt = userPrompt
+        ? `${userPrompt}\n\n${panoramaPrompt}`
+        : panoramaPrompt;
+
+      const model = currentModel;
+      const quality = data.quality || getImageQualityOptions(model)[0].value;
+      const ratio = data.ratio || '21:9';
+
+      // ★ 拼接比例前缀
+      let ratioPrefix = '';
+      if (model === 'gpt-image-2') {
+        const prefixMap: Record<string, string> = {
+          '21:9': '横版 21:9 超宽全景画幅, ',
+          '32:9': '横版 32:9 超宽全景画幅, ',
+          '16:9': '横版 16:9 电影画幅, ',
+        };
+        ratioPrefix = prefixMap[ratio] || '横版 21:9 超宽全景画幅, ';
+      } else {
+        const prefixMap: Record<string, string> = {
+          '21:9': 'ultrawide 21:9 panoramic, ',
+          '32:9': 'ultrawide 32:9 panoramic, ',
+          '16:9': 'widescreen 16:9, ',
+        };
+        ratioPrefix = prefixMap[ratio] || 'ultrawide 21:9 panoramic, ';
+      }
+
+      const payload: any = {
+        model,
+        prompt: ratioPrefix + finalPrompt,
+        n: 1,
+      };
+
+      // ★ 不同模型的清晰度参数映射（与 useCanvasEngine.ts 严格对齐）
+      if (model === 'banana-pro') {
+        payload.aspectRatio = ratio;
+        // banana-pro: imageSize = '1K' | '2K' | '4K'
+        payload.imageSize = quality.includes('4K') ? '4K' : quality.includes('2K') ? '2K' : '1K';
+      } else if (model === 'seedream5.0' || model === 'seedream-5-0-pro-260628') {
+        // seedream5.0: 仅支持 2K/3K，需按比例精确映射 WxH
+        const seedreamSizeMap: Record<string, Record<string, string>> = {
+          '16:9': { '2K': '2736x1538', '3K': '3456x1944' },
+          '9:16': { '2K': '1538x2736', '3K': '1944x3456' },
+          '1:1':  { '2K': '2048x2048', '3K': '3072x3072' },
+          '4:3':  { '2K': '2364x1774', '3K': '3072x2304' },
+          '3:4':  { '2K': '1774x2364', '3K': '2304x3072' },
+          '21:9': { '2K': '3136x1344', '3K': '3584x1536' },
+          '32:9': { '2K': '4096x1152', '3K': '5120x1440' },
+        };
+        const grade = quality.includes('3K') ? '3K' : '2K';
+        payload.size = (seedreamSizeMap[ratio] || seedreamSizeMap['16:9'])[grade];
+      }
+
+      // 收集参考图
+      const refs = incomingRefs.filter(Boolean);
+      if (refs.length > 0) {
+        payload.images = refs;
+      }
+
+      console.log('[PanoramaNode] 全景图生成 payload:', payload);
+
+      const response = await fetchApi('/v1/images/generations', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+
+      const resData = await response.json();
+
+      let url: string | null = null;
+      if (resData.data?.[0]?.url) url = resData.data[0].url;
+      else if (resData.url) url = resData.url;
+      else if (resData.images?.[0]?.url || resData.images?.[0]) url = resData.images?.[0]?.url || resData.images?.[0];
+      else if (resData.choices?.[0]?.message?.content) {
+        const match = resData.choices[0].message.content.match(/!\[.*?\]\((.*?)\)/);
+        if (match?.[1]) url = match[1];
+      }
+
+      if (url) {
+        updateNodeData(id, { status: 'done', resultUrl: url, frameUrl: url });
+        useAppStore.getState().setToastMsg('✅ 全景图生成成功！点击图片查看 360° 全景');
+      } else {
+        throw new Error('API 未返回全景图 URL');
+      }
+    } catch (error: any) {
+      console.error('[PanoramaNode] 全景图生成失败:', error);
+      updateNodeData(id, { status: 'failed' });
+      useAppStore.getState().setToastMsg(`❌ 全景图生成失败: ${error.message || '未知错误'}`);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  // ★ 截图回调：从全景查看器截取当前视角，创建新图片节点
+  const handleCapture = useCallback((dataUrl: string) => {
+    const thisNode = getNodes().find((n: any) => n.id === id);
+    if (!thisNode || !dataUrl) return;
+
+    const captureId = `capture_${Date.now()}`;
+    const captureNode = {
+      id: captureId,
+      type: 'media',
+      position: { x: thisNode.position.x, y: thisNode.position.y + 300 },
+      data: {
+        resultUrl: dataUrl,
+        prompt: `全景截图: ${data.prompt || ''}`,
+        ratio: '16:9',
+        model: data.model || 'gpt-image-2',
+        status: 'done',
+      }
+    };
+
+    setNodes((nds: any) => [...nds, captureNode]);
+    useAppStore.getState().setToastMsg('📸 当前视角已截取为新图片节点！');
+  }, [id, data.prompt, data.model, getNodes, setNodes]);
+
+  return (
+    <div className="relative z-20 group">
+      <Handle type="target" position={Position.Left} id="left" className={handleLeft} />
+      <Handle type="source" position={Position.Right} id="right" className={handleRight} />
+
+      <div style={{ width: `${panoStyle.width}px` }} className={`${nodeBaseClass} ${selected ? selectedBorderClass : unselectedBorderClass} flex flex-col p-3`}>
+        {/* ★ 节点头部 — 黑色液态玻璃风格 */}
+        <div className="flex items-center gap-2 mb-3 pb-2 border-b border-white/[0.06]">
+          <Globe size={14} className="text-emerald-400" />
+          <span className="text-[11px] font-bold text-white tracking-widest uppercase">全景图</span>
+          {status === 'generating' && <Loader2 size={12} className="text-emerald-400 animate-spin ml-auto" />}
+          {status === 'done' && <CheckCircle size={12} className="text-emerald-400 ml-auto" />}
+          {status === 'failed' && <X size={12} className="text-red-400 ml-auto" />}
+        </div>
+
+        {/* 预览区域 */}
+        <div style={{ aspectRatio: panoStyle.aspectRatio }} className="w-full bg-[#020204] rounded-[12px] overflow-hidden mb-3 relative border border-white/[0.04]">
+          {displayImage && status === 'done' ? (
+            <div className="w-full h-full relative cursor-pointer group/img" onClick={() => setShowFullscreen(true)}>
+              <img src={displayImage} alt="全景图" className="w-full h-full object-cover" />
+              <div className="absolute top-2 right-2 bg-[#0a0a0c]/80 backdrop-blur-md border border-white/[0.08] text-white text-[10px] px-2 py-0.5 rounded-full font-mono flex items-center gap-1">
+                <Maximize size={10} /> 360°
+              </div>
+              <div className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover/img:bg-black/30 transition-all">
+                <span className="opacity-0 group-hover/img:opacity-100 text-white text-xs font-medium bg-[#0a0a0c]/80 backdrop-blur-md border border-white/[0.08] px-4 py-1.5 rounded-full transition-all">
+                  点击查看 360° 全景
+                </span>
+              </div>
+            </div>
+          ) : status === 'generating' ? (
+            <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-emerald-950/10 to-blue-950/10">
+              <Loader2 size={24} className="text-emerald-400 animate-spin" />
+              <span className="text-zinc-500 text-[11px]">生成全景图中...</span>
+            </div>
+          ) : status === 'failed' ? (
+            <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-red-950/10 to-orange-950/10">
+              <X size={24} className="text-red-400" />
+              <span className="text-zinc-500 text-[11px]">生成失败，请重试</span>
+            </div>
+          ) : (
+            <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-emerald-950/10 to-blue-950/10">
+              <Globe size={24} className="text-emerald-500/20" />
+              <span className="text-zinc-600 text-[11px]">输入场景描述后点击生成</span>
+            </div>
+          )}
+        </div>
+
+        {/* ★ 配置区域 — 黑色液态玻璃统一风格 */}
+        <div className="flex flex-col gap-2.5">
+          {/* 场景描述 */}
+          <textarea
+            data-node-id={id} data-field="prompt" data-field-label="场景描述"
+            value={data.prompt || ''}
+            onChange={(e) => updateNodeData(id, { prompt: e.target.value })}
+            placeholder="描述全景场景..."
+            className="w-full bg-[#0a0a0c]/60 backdrop-blur-sm border border-white/[0.06] rounded-[10px] p-2.5 text-[11px] text-zinc-300 placeholder:text-zinc-600 outline-none resize-none h-14 focus:border-emerald-500/30 transition-all nodrag nopan"
+            onWheelCapture={(e) => e.stopPropagation()}
+          />
+
+          {/* 模型 + 比例 + 清晰度 — 三栏均衡 */}
+          <div className="flex gap-2 items-center">
+            <CustomSelect
+              className="flex-[2] min-w-0"
+              value={currentModel}
+              options={[
+                { value: 'gpt-image-2', label: 'GPT-Image-2' },
+                { value: 'banana-pro', label: 'Banana Pro' },
+                { value: 'seedream5.0', label: 'Seedream 5.0' },
+              ]}
+              onChange={handleModelChange}
+            />
+            <CustomSelect
+              className="flex-[1] min-w-0"
+              value={data.ratio || '21:9'}
+              options={[
+                { value: '21:9', label: '21:9' },
+                { value: '32:9', label: '32:9' },
+                { value: '16:9', label: '16:9' },
+              ]}
+              onChange={(v: string) => updateNodeData(id, { ratio: v })}
+            />
+            <CustomSelect
+              className="flex-[1] min-w-0"
+              value={data.quality || getImageQualityOptions(currentModel)[0].value}
+              options={getImageQualityOptions(currentModel)}
+              onChange={(v: string) => updateNodeData(id, { quality: v })}
+            />
+          </div>
+
+          {/* 生成按钮 — 黑色液态玻璃 */}
+          <button
+            onClick={handleGenerate}
+            disabled={isGenerating || status === 'generating'}
+            className="w-full py-2.5 rounded-[12px] bg-emerald-500/10 backdrop-blur-sm border border-emerald-500/20 text-emerald-400 text-[12px] font-bold hover:bg-emerald-500/20 hover:border-emerald-500/30 transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-[0_8px_32px_rgba(16,185,129,0.06)]"
+          >
+            {status === 'generating' ? (
+              <><Loader2 size={13} className="animate-spin" /> 生成中...</>
+            ) : (
+              <><Globe size={13} /> 生成全景图</>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* ★ 全屏 360° 查看器 — Portal 到 body 避开 ReactFlow 事件劫持 */}
+      {showFullscreen && displayImage && createPortal(
+        <PanoramaViewer
+          imageUrl={displayImage}
+          onCapture={handleCapture}
+          onClose={() => setShowFullscreen(false)}
+        />,
+        document.body
+      )}
+    </div>
+  );
+};
+export const PanoramaNode = React.memo(_PanoramaNode);
