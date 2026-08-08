@@ -632,7 +632,7 @@ export default function LoginPage() {
               <div className="absolute inset-0 rounded-2xl overflow-hidden pointer-events-none">
                 <div className="absolute inset-0" style={{ background: 'linear-gradient(135deg, transparent 35%, rgba(255,255,255,0.05) 48%, transparent 65%)' }} />
               </div>
-              <span className="relative text-white text-[22px] font-black tracking-tighter select-none" style={{ textShadow: '0 0 25px rgba(255,255,255,0.08)' }}>YR</span>
+              <span className="relative text-white text-[22px] font-black tracking-tighter select-none" style={{ textShadow: '0 0 25px rgba(255,255,255,0.08)' }}>W</span>
             </div>
             <h1 className="text-lg font-thin text-white tracking-[0.4em] mb-2 select-none" style={{ letterSpacing: '0.5em' }}>WELCOME</h1>
             <p className="text-[10px] text-zinc-700 tracking-[0.3em] font-light select-none">登录以继续</p>

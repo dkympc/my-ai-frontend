@@ -23,7 +23,7 @@ export function ChatLayout() {
       {/* 侧边栏可以以后再加，现在先做核心聊天区 */}
       <div className="flex flex-col h-full w-full">
         <div className="p-4 border-b font-semibold flex justify-between items-center bg-card">
-          <span>依然AI V2.0</span>
+          <span>无中生</span>
           <div className="text-xs text-muted-foreground">FastAPI + Next.js</div>
         </div>
         

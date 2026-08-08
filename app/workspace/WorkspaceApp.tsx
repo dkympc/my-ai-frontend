@@ -221,8 +221,8 @@ export default function WorkspaceApp() {
         let currentUsername = 'User';
         try { currentUsername = JSON.parse(atob(token.split('.')[1])).sub; } catch(e) {}
         const dbSettings = data.settings || {};
-        if (dbSettings.nickname === '依然开发者') dbSettings.nickname = currentUsername;
-        if (dbSettings.avatar === 'RY') dbSettings.avatar = currentUsername.charAt(0).toUpperCase();
+        if (dbSettings.nickname === '无中生开发者') dbSettings.nickname = currentUsername;
+        if (dbSettings.avatar === 'W') dbSettings.avatar = currentUsername.charAt(0).toUpperCase();
         setSettings(prev => ({ 
           ...prev, ...dbSettings,
           nickname: dbSettings.nickname || currentUsername,
@@ -460,9 +460,9 @@ export default function WorkspaceApp() {
       }
       const blob = new Blob([mdContent], { type: 'text/markdown;charset=utf-8' });
       const objectUrl = URL.createObjectURL(blob);
-      const link = document.createElement('a'); link.href = objectUrl; link.download = `YR_${_type === 'chat' ? 'Chat' : 'Workflow'}_${id}.md`; link.click(); URL.revokeObjectURL(objectUrl);
+      const link = document.createElement('a'); link.href = objectUrl; link.download = `W_${_type === 'chat' ? 'Chat' : 'Workflow'}_${id}.md`; link.click(); URL.revokeObjectURL(objectUrl);
     } else if (_type === 'image' || _type === 'video') {
-      const link = document.createElement('a'); link.href = url; link.download = `YR_AI_${_type === 'image' ? 'Image' : 'Video'}_${id}.${_type === 'image' ? 'png' : 'mp4'}`; link.click();
+      const link = document.createElement('a'); link.href = url; link.download = `W_${_type === 'image' ? 'Image' : 'Video'}_${id}.${_type === 'image' ? 'png' : 'mp4'}`; link.click();
     }
   };
 
@@ -481,7 +481,7 @@ export default function WorkspaceApp() {
   const handleExportData = () => {
     const data = { sessions, imageHistory, videoHistory, settings, wfSessions };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `yr_ai_export_${new Date().getTime()}.json`; a.click(); URL.revokeObjectURL(url);
+    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `wzs_export_${new Date().getTime()}.json`; a.click(); URL.revokeObjectURL(url);
   };
 
   const handleLogout = async () => {
@@ -544,7 +544,7 @@ export default function WorkspaceApp() {
   };
 
   // 认证检查中显示 loading
-  if (isAuthChecking) return <div className="h-screen bg-[#0d0d0d] flex items-center justify-center text-zinc-500 font-mono text-sm">Initializing YR AI Engine...</div>;
+  if (isAuthChecking) return <div className="h-screen bg-[#0d0d0d] flex items-center justify-center text-zinc-500 font-mono text-sm">Initializing 无中生 Engine...</div>;
 
   // ==================== 认证后的 SPA UI（原 page.tsx 第 1285 行起） ====================
   return (

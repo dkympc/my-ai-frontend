@@ -260,12 +260,12 @@ export default function SettingsModal({
                 <label className="text-[11px] font-medium text-zinc-500 tracking-wider uppercase">用户头像</label>
                 <div className="flex items-center gap-6">
                   <div className="w-16 h-16 rounded-[20px] bg-white/[0.02] backdrop-blur-md flex items-center justify-center text-xl font-light text-zinc-300 overflow-hidden border border-white/[0.08] shadow-[0_10px_30px_rgba(0,0,0,0.5)]">
-                    {settings.avatar.startsWith('data:image') ? <img src={settings.avatar} className="w-full h-full object-cover" /> : settings.avatar || 'YR'}
+                    {settings.avatar.startsWith('data:image') ? <img src={settings.avatar} className="w-full h-full object-cover" /> : settings.avatar || 'W'}
                   </div>
                   <input type="file" ref={avatarInputRef} onChange={handleAvatarUpload} accept="image/*" className="hidden" />
                   <div className="flex gap-3">
                     <button onClick={() => avatarInputRef.current?.click()} className="px-5 py-2.5 bg-white/[0.03] border border-white/[0.08] rounded-xl text-[13px] text-zinc-300 hover:bg-white/10 hover:text-white transition-all">上传新头像</button>
-                    <button onClick={() => setSettings((prev: any) => ({...prev, avatar: 'YR'}))} className="px-5 py-2.5 bg-transparent text-[13px] text-zinc-500 hover:text-zinc-300 transition-colors">恢复默认</button>
+                    <button onClick={() => setSettings((prev: any) => ({...prev, avatar: 'W'}))} className="px-5 py-2.5 bg-transparent text-[13px] text-zinc-500 hover:text-zinc-300 transition-colors">恢复默认</button>
                   </div>
                 </div>
               </div>
@@ -275,7 +275,7 @@ export default function SettingsModal({
                 <input 
                   type="text" value={settings.nickname} 
                   onChange={(e) => setSettings((prev: any) => ({...prev, nickname: e.target.value}))} 
-                  placeholder="例如：依然开发者" 
+                  placeholder="例如：无中生开发者" 
                   className="w-full bg-black/40 border border-white/[0.08] rounded-[16px] px-5 py-4 text-[13px] text-zinc-200 placeholder-zinc-600 focus:border-white/30 focus:shadow-[0_0_20px_rgba(255,255,255,0.05)] transition-all outline-none" 
                 />
               </div>

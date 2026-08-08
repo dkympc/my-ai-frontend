@@ -132,7 +132,7 @@ export default function Sidebar({
               setCurrentSessionId(null); 
             });
           }}>
-          <span className="text-black text-xs font-black tracking-tighter">YR</span>
+          <span className="text-black text-xs font-black tracking-tighter">W</span>
         </div>
         
         <nav ref={navRef} className="flex-1 w-full flex flex-col items-center gap-0.5">

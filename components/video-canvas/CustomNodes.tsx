@@ -2052,7 +2052,7 @@ const _ShotNode = ({ id, data, selected }: any) => {
             </div>
           </div>
           
-          <button onClick={(e) => { e.stopPropagation(); const a = document.createElement('a'); a.href = data.frameUrl; a.download = `YR_Shot_${Date.now()}.png`; a.click(); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] text-[11px] font-bold text-zinc-300 hover:text-black hover:bg-white transition-all shadow-md whitespace-nowrap"><Download size={12}/> 下载</button>
+          <button onClick={(e) => { e.stopPropagation(); const a = document.createElement('a'); a.href = data.frameUrl; a.download = `W_Shot_${Date.now()}.png`; a.click(); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[10px] text-[11px] font-bold text-zinc-300 hover:text-black hover:bg-white transition-all shadow-md whitespace-nowrap"><Download size={12}/> 下载</button>
         </div>
       )}
       
@@ -2483,7 +2483,7 @@ const _VideoClipNode = ({ id, data, selected }: any) => {
           {/* ✨ 下面这行是新加的存资产按钮 */}
           <button onClick={handleSaveAsset} className="flex items-center gap-1.5 px-3 py-1 rounded-[10px] text-[11px] font-medium text-zinc-400 hover:text-white hover:bg-white/10 transition-colors whitespace-nowrap"><RefreshCcw size={12}/> 存资产</button>
           
-          <button onClick={(e) => { e.stopPropagation(); const a = document.createElement('a'); a.href = data.videoUrl; a.download = `YR_Video_${Date.now()}.mp4`; a.click(); }} className="flex items-center gap-1.5 px-3 py-1 rounded-[10px] text-[11px] font-bold text-zinc-300 hover:text-black hover:bg-white transition-all shadow-md whitespace-nowrap">
+          <button onClick={(e) => { e.stopPropagation(); const a = document.createElement('a'); a.href = data.videoUrl; a.download = `W_Video_${Date.now()}.mp4`; a.click(); }} className="flex items-center gap-1.5 px-3 py-1 rounded-[10px] text-[11px] font-bold text-zinc-300 hover:text-black hover:bg-white transition-all shadow-md whitespace-nowrap">
             <Download size={12}/> 下载
           </button>
         </div>
@@ -2535,7 +2535,7 @@ const _VideoClipNode = ({ id, data, selected }: any) => {
               </div>
               <div className="w-px h-3 bg-white/10 mx-0.5"></div>
               <button 
-                onClick={(e) => { e.stopPropagation(); const a = document.createElement('a'); a.href = data.videoUrl; a.download = `YR_Video_${Date.now()}.mp4`; a.click(); }} 
+                onClick={(e) => { e.stopPropagation(); const a = document.createElement('a'); a.href = data.videoUrl; a.download = `W_Video_${Date.now()}.mp4`; a.click(); }} 
                 className="flex items-center gap-1 px-2.5 py-1 rounded-[8px] text-[10px] font-bold text-zinc-300 hover:text-black hover:bg-white transition-all shadow-md whitespace-nowrap"
               >
                 <Download size={10}/> 下载
@@ -2914,7 +2914,7 @@ const _MediaNode = ({ id, data, selected }: any) => {
     e.stopPropagation();
     if (!displayImage) return;
     const a = document.createElement('a');
-    a.href = displayImage; a.download = `YR_Image_${Date.now()}.png`;
+    a.href = displayImage; a.download = `W_Image_${Date.now()}.png`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
   };
 
@@ -3290,7 +3290,7 @@ const _RenderNode = ({ id, data, selected }: any) => {
     e.stopPropagation();
     if (!displayVideo) return;
     const a = document.createElement('a');
-    a.href = displayVideo; a.download = `YR_Video_${Date.now()}.mp4`;
+    a.href = displayVideo; a.download = `W_Video_${Date.now()}.mp4`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
   };
 
@@ -3792,7 +3792,7 @@ const _AssetTableNode = ({ id, data, selected }: any) => {
     const a = document.createElement('a');
     a.href = url;
     const typeName = data.assetType === 'scene' ? '场景表' : data.assetType === 'character' ? '角色表' : '道具表';
-    a.download = `YR_${typeName}_${Date.now()}.json`;
+    a.download = `W_${typeName}_${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
     useAppStore.getState().setToastMsg(`✅ ${typeName} 导出成功！`);

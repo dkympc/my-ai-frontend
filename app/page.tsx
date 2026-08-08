@@ -254,7 +254,11 @@ export default function LandingPage() {
       <header className="fixed top-0 left-0 right-0 z-50 h-16 flex items-center justify-between px-8 md:px-14"
         style={{ background: "linear-gradient(180deg, rgba(6,6,14,0.94) 0%, rgba(6,6,14,0.25) 85%, transparent 100%)", backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)" }}>
         <div className="flex items-center gap-6">
-          <span className="text-base font-light text-white/85 tracking-[0.28em] select-none">YR AI</span>
+          <span className="text-base select-none">
+            <span className="font-light tracking-[0.25em] text-white/90" style={{ textShadow: '0 0 30px rgba(255,255,255,0.12)' }}>无中生</span>
+            <span className="mx-2 text-white/15 font-thin">|</span>
+            <span className="font-light tracking-[0.3em] text-white/50" style={{ letterSpacing: '0.4em' }}>AI</span>
+          </span>
           {isClient && isLoggedIn && (
             <button onClick={() => router.push("/workspace")}
               className="relative px-5 py-2 rounded-xl text-xs font-light tracking-[0.15em] transition-all duration-500"
@@ -281,8 +285,10 @@ export default function LandingPage() {
             <Star size={14} className="text-zinc-600" /> 每个人都是导演
           </div>
           <h1 className="section-reveal section-reveal-d2 text-8xl md:text-[9rem] lg:text-[11rem] font-thin tracking-[0.01em] text-white mb-12 select-none leading-none"
-            style={{ textShadow: "0 0 140px rgba(170,175,200,0.2), 0 0 280px rgba(140,150,180,0.08)" }}>
-            YR AI
+            style={{ textShadow: "0 0 140px rgba(255,255,255,0.15), 0 0 280px rgba(200,200,220,0.06), 0 0 40px rgba(255,255,255,0.08)" }}>
+            <span className="bg-gradient-to-b from-white via-white to-white/70 bg-clip-text text-transparent" style={{ WebkitTextFillColor: 'transparent' }}>无中生</span>
+            <span className="mx-3 md:mx-4 text-white/10 font-thin align-middle" style={{ fontSize: '0.35em', verticalAlign: 'middle' }}>|</span>
+            <span className="text-white/40 font-thin tracking-[0.15em]" style={{ fontSize: '0.4em', verticalAlign: 'middle' }}>AI</span>
           </h1>
           <div className="section-reveal section-reveal-d3 relative mb-12">
             <div className="w-64 h-px mx-auto rounded-full"
@@ -585,7 +591,7 @@ export default function LandingPage() {
 
         {/* ---- Footer ---- */}
         <footer className="py-16 px-6 text-center">
-          <p className="text-xs text-zinc-700 tracking-[0.25em] font-light select-none">&copy; 2026 YR AI</p>
+          <p className="text-xs text-zinc-700 tracking-[0.25em] font-light select-none">&copy; 2026 无中生</p>
         </footer>
       </main>
     </div>

@@ -190,7 +190,7 @@ export default function ImageGenerator({
           <div className="absolute top-6 right-6 flex gap-2 z-10">
             {activeImageId && (
               <button 
-                onClick={() => { const img = imageHistory.find(i => i.id === activeImageId); if(img && img.url) { const link = document.createElement('a'); link.href = img.url; link.download = `YR_AI_Image_${img.id}.png`; link.click(); } }} 
+                onClick={() => { const img = imageHistory.find(i => i.id === activeImageId); if(img && img.url) { const link = document.createElement('a'); link.href = img.url; link.download = `W_Image_${img.id}.png`; link.click(); } }} 
                 className="p-3 bg-black/40 backdrop-blur-2xl border border-white/10 rounded-full text-zinc-400 hover:text-white transition-all hover:bg-black/60 shadow-lg hover:scale-110"
               >
                 <Download size={18} />

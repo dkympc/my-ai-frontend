@@ -120,8 +120,10 @@ export default function ChatView({
       {messages.length === 0 ? (
           <div className="mt-8 flex flex-col items-center max-w-3xl mx-auto text-center">
             <div className="mb-5 flex items-center justify-center select-none">
-              <span className="text-5xl font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-b from-white to-zinc-600 drop-shadow-[0_0_15px_rgba(255,255,255,0.15)] ml-2">
-                YR
+              <span className="text-3xl font-light tracking-[0.15em] text-transparent bg-clip-text bg-gradient-to-b from-white via-white/90 to-zinc-500 drop-shadow-[0_0_25px_rgba(255,255,255,0.12)] select-none">
+                无中生
+                <span className="mx-2 text-white/15 font-thin text-xl">|</span>
+                <span className="text-white/40 font-thin tracking-[0.25em] text-lg">AI</span>
               </span>
             </div>
             
@@ -209,7 +211,7 @@ export default function ChatView({
           </div>
           
           <div className="mt-4 text-center pb-6">
-            <p className="text-[10px] text-zinc-600 font-medium tracking-widest uppercase">依然引擎开发 · AI生成可能产生事实错误</p>
+            <p className="text-[10px] text-zinc-600 font-medium tracking-widest uppercase">无中生引擎 · AI生成可能产生事实错误</p>
           </div>
         </div>
       </div>
