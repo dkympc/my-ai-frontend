@@ -215,9 +215,9 @@ function SavePresetModal({ onSave, onCancel }: { onSave: (name: string) => void;
   return (<div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onMouseDown={(e) => e.stopPropagation()} onClick={onCancel}>
     <div className="bg-[#121214]/95 backdrop-blur-3xl border border-white/[0.08] rounded-[20px] p-6 w-[340px] shadow-[0_30px_60px_rgba(0,0,0,0.8)]" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
       <h3 className="text-white text-sm font-bold mb-4 tracking-wider">保存机位预设</h3>
-      <input ref={inputRef} type="text" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancel(); }} placeholder="例如：特写A、全景B、过肩C..." className="w-full bg-[#0a0a0c]/80 border border-white/[0.06] rounded-[12px] p-3 text-sm text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-violet-500/30 transition-all mb-5" />
+      <input ref={inputRef} type="text" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancel(); }} placeholder="例如：特写A、全景B、过肩C..." className="w-full bg-[#0a0a0c]/80 border border-white/[0.06] rounded-[12px] p-3 text-sm text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-white/20 transition-all mb-5" />
       <div className="flex gap-2"><button onClick={onCancel} className="flex-1 py-2.5 rounded-[12px] bg-white/[0.04] border border-white/[0.06] text-zinc-400 text-xs font-medium hover:bg-white/[0.08] transition-all">取消</button>
-      <button onClick={submit} disabled={!name.trim()} className="flex-1 py-2.5 rounded-[12px] bg-violet-500/20 border border-violet-500/30 text-violet-300 text-xs font-bold hover:bg-violet-500/30 transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"><Check size={13} /> 保存</button></div>
+      <button onClick={submit} disabled={!name.trim()} className="flex-1 py-2.5 rounded-[12px] bg-white/[0.08] border border-white/[0.12] text-zinc-200 text-xs font-bold hover:bg-white/[0.12] transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"><Check size={13} /> 保存</button></div>
     </div>
   </div>);
 }
@@ -283,25 +283,25 @@ const DirectorStageEditor: React.FC<DirectorStageEditorProps> = ({
   return (
     <div className="fixed inset-0 z-[9999] bg-[#020204] select-none flex">
       <div className="w-[260px] flex-shrink-0 bg-[#0a0a0c]/95 backdrop-blur-3xl border-r border-white/[0.06] flex flex-col">
-        <div className="p-4 border-b border-white/[0.06]"><h2 className="text-white text-sm font-bold tracking-wider flex items-center gap-2"><UserRound size={16} className="text-violet-400" /> 角色列表</h2></div>
+        <div className="p-4 border-b border-white/[0.06]"><h2 className="text-white text-sm font-bold tracking-wider flex items-center gap-2"><UserRound size={16} className="text-zinc-400" /> 角色列表</h2></div>
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
           {characters.map((c) => (
             <button key={c.id} onClick={() => setSelectedCharId(c.id)} className={`w-full flex items-center gap-3 p-3 rounded-[12px] text-left transition-all ${selectedCharId === c.id ? 'bg-white/10 border border-white/15' : 'hover:bg-white/5 border border-transparent'}`}>
               <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: c.color }}>{c.type === 'male' ? <User size={14} className="text-white/80" /> : <UserRound size={14} className="text-white/80" />}</div>
               <div className="flex-1 min-w-0"><div className="text-white text-xs font-medium truncate">{c.type === 'male' ? '男性' : '女性'}人偶</div><div className="text-zinc-500 text-[10px]">{POSE_LABELS[c.pose]}</div></div>
-              <span onClick={(e) => { e.stopPropagation(); handleRemoveChar(c.id); }} className="p-1.5 rounded-lg hover:bg-red-500/20 text-zinc-600 hover:text-red-400 transition-all cursor-pointer"><Trash2 size={12} /></span>
+              <span onClick={(e) => { e.stopPropagation(); handleRemoveChar(c.id); }} className="p-1.5 rounded-lg hover:bg-white/[0.08] text-zinc-600 hover:text-zinc-300 transition-all cursor-pointer"><Trash2 size={12} /></span>
             </button>
           ))}
           {characters.length === 0 && <div className="text-zinc-600 text-xs text-center py-8">点击下方按钮添加角色</div>}
         </div>
         <div className="p-3 border-t border-white/[0.06] flex gap-2">
-          <button onClick={() => handleAddChar('male')} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-[10px] bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-bold hover:bg-blue-500/20 transition-all"><User size={14} /> 男</button>
-          <button onClick={() => handleAddChar('female')} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-[10px] bg-pink-500/10 border border-pink-500/20 text-pink-400 text-xs font-bold hover:bg-pink-500/20 transition-all"><UserRound size={14} /> 女</button>
+          <button onClick={() => handleAddChar('male')} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-[10px] bg-white/[0.06] border border-white/[0.1] text-zinc-300 text-xs font-bold hover:bg-white/[0.1] transition-all"><User size={14} /> 男</button>
+          <button onClick={() => handleAddChar('female')} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-[10px] bg-white/[0.06] border border-white/[0.1] text-zinc-300 text-xs font-bold hover:bg-white/[0.1] transition-all"><UserRound size={14} /> 女</button>
         </div>
       </div>
 
       <div ref={canvasContainerRef} className="flex-1 relative" onClick={handleDeselect}>
-        {loading && backgroundUrl && (<div className="absolute inset-0 z-40 flex items-center justify-center bg-[#020204]/95 backdrop-blur-sm"><div className="flex flex-col items-center gap-4 p-8 bg-[#0a0a0c]/80 backdrop-blur-3xl border border-white/[0.06] rounded-[24px]"><Loader2 size={32} className="text-violet-400 animate-spin" /><span className="text-white/40 text-sm font-medium">加载场景中...</span></div></div>)}
+        {loading && backgroundUrl && (<div className="absolute inset-0 z-40 flex items-center justify-center bg-[#020204]/95 backdrop-blur-sm"><div className="flex flex-col items-center gap-4 p-8 bg-[#0a0a0c]/80 backdrop-blur-3xl border border-white/[0.06] rounded-[24px]"><Loader2 size={32} className="text-zinc-400 animate-spin" /><span className="text-white/40 text-sm font-medium">加载场景中...</span></div></div>)}
         <Canvas camera={{ position: [0, 2, 8], fov: 75, near: 0.1, far: 300 }} gl={{ preserveDrawingBuffer: true, antialias: true, alpha: false, powerPreference: 'high-performance' }} dpr={[1, Math.min(window.devicePixelRatio || 1, 3)]}>
           <Suspense fallback={null}>
             <SceneContent backgroundUrl={backgroundUrl} panoramaMode={panoramaMode} characters={characters} selectedCharId={selectedCharId} onSelectChar={(id) => setSelectedCharId(id)} charRefsRef={charRefsRef} onReady={handleReady} fov={fov} transformMode={transformMode} onDragEnd={syncTransforms} />
@@ -310,11 +310,11 @@ const DirectorStageEditor: React.FC<DirectorStageEditorProps> = ({
 
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 p-1.5 bg-[#0a0a0c]/90 backdrop-blur-3xl border border-white/[0.08] rounded-[16px] shadow-[0_20px_60px_rgba(0,0,0,0.8)]">
           <span className="text-white/30 text-[10px] px-1 font-medium tracking-wider">FOV</span>
-          <input type="range" min={30} max={120} value={fov} onChange={(e) => setFov(Number(e.target.value))} className="w-24 h-1 accent-violet-500" />
+          <input type="range" min={30} max={120} value={fov} onChange={(e) => setFov(Number(e.target.value))} className="w-24 h-1 accent-white" />
           <span className="text-white/60 text-[10px] font-mono w-8 text-right">{fov}°</span>
           <div className="w-px h-5 bg-white/10" />
           <button onClick={(e) => { e.stopPropagation(); setShowSavePreset(true); }} className="flex items-center gap-1 px-3 py-1.5 rounded-[8px] text-xs text-zinc-400 hover:text-white hover:bg-white/10 transition-all"><Save size={12} /> 保存机位</button>
-          <button onClick={handleCapture} className="flex items-center gap-1 px-3 py-1.5 rounded-[8px] text-xs text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 transition-all"><Camera size={12} /> 截图→新节点</button>
+          <button onClick={handleCapture} className="flex items-center gap-1 px-3 py-1.5 rounded-[8px] text-xs text-zinc-300 hover:text-white hover:bg-white/[0.08] transition-all"><Camera size={12} /> 截图→新节点</button>
           <div className="w-px h-5 bg-white/10" />
           <button onClick={handleClose} className="flex items-center justify-center w-7 h-7 rounded-[8px] text-zinc-400 hover:text-white hover:bg-white/10 transition-all"><X size={14} /></button>
         </div>
@@ -330,7 +330,7 @@ const DirectorStageEditor: React.FC<DirectorStageEditorProps> = ({
             <div><div className="text-zinc-500 text-[10px] font-medium mb-2 tracking-wider uppercase">操作模式</div>
               <div className="flex gap-1">
                 {([{ k: 'translate', icon: <Move3d size={13} />, label: '移动' }, { k: 'rotate', icon: <Rotate3d size={13} />, label: '旋转' }, { k: 'scale', icon: <ZoomIn size={13} />, label: '缩放' }] as const).map(({ k, icon, label }) => (
-                  <button key={k} onClick={() => setTransformMode(k)} className={`flex-1 flex flex-col items-center gap-1 py-2 rounded-[8px] text-[10px] font-medium transition-all ${transformMode === k ? 'bg-violet-500/20 text-violet-300 border border-violet-500/30' : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5 border border-transparent'}`}>{icon}<span>{label}</span></button>))}</div>
+                  <button key={k} onClick={() => setTransformMode(k)} className={`flex-1 flex flex-col items-center gap-1 py-2 rounded-[8px] text-[10px] font-medium transition-all ${transformMode === k ? 'bg-white/[0.08] text-zinc-200 border border-white/[0.12]' : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5 border border-transparent'}`}>{icon}<span>{label}</span></button>))}</div>
             </div>
             <div><div className="text-zinc-500 text-[10px] font-medium mb-2 tracking-wider uppercase">颜色</div>
               <div className="grid grid-cols-6 gap-1.5">{PRESET_COLORS.map((c) => (<button key={c} onClick={() => handleUpdateChar(selectedChar.id, { color: c })} className="w-7 h-7 rounded-full border-2 transition-all hover:scale-110" style={{ backgroundColor: c, borderColor: selectedChar.color === c ? '#ffffff' : 'transparent' }} />))}</div>
@@ -339,7 +339,7 @@ const DirectorStageEditor: React.FC<DirectorStageEditorProps> = ({
               <div className="flex gap-1.5">{(Object.keys(POSE_LABELS) as Array<keyof typeof POSE_LABELS>).map((p) => (<button key={p} onClick={() => handleUpdateChar(selectedChar.id, { pose: p })} className={`flex-1 py-2 rounded-[8px] text-[10px] font-medium transition-all ${selectedChar.pose === p ? 'bg-white/10 text-white border border-white/15' : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5 border border-transparent'}`}>{POSE_LABELS[p]}</button>))}</div>
             </div>
             <div><div className="text-zinc-500 text-[10px] font-medium mb-2 tracking-wider uppercase">尺寸 <span className="text-zinc-600 font-mono ml-1">{selectedChar.scale[0].toFixed(1)}x</span></div>
-              <input type="range" min={0.2} max={20} step={0.1} value={Math.min(selectedChar.scale[0], 20)} onChange={(e) => { const v = Number(e.target.value); handleUpdateChar(selectedChar.id, { scale: [v, v, v] }); }} className="w-full h-1 accent-violet-500" />
+              <input type="range" min={0.2} max={20} step={0.1} value={Math.min(selectedChar.scale[0], 20)} onChange={(e) => { const v = Number(e.target.value); handleUpdateChar(selectedChar.id, { scale: [v, v, v] }); }} className="w-full h-1 accent-white" />
               <div className="flex justify-between text-[8px] text-zinc-700 mt-0.5"><span>0.2x</span><span>20x</span></div>
             </div>
           </div>

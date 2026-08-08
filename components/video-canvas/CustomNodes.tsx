@@ -1768,7 +1768,7 @@ const handleCreatePanorama = (sourceId: string, sourceData: any, getNodes: any, 
     target: panoramaId,
     sourceHandle: 'right',
     targetHandle: 'left',
-    style: { stroke: '#10b981', strokeWidth: 2, strokeDasharray: '5,5' }, // 绿色虚线标识全景连线
+    style: { stroke: '#71717a', strokeWidth: 2, strokeDasharray: '5,5' }, // 全景连线
   };
 
   setNodes((nds: any) => [...nds, newNode]);
@@ -4260,11 +4260,11 @@ const _PanoramaNode = ({ id, data, selected }: any) => {
       <div style={{ width: `${panoStyle.width}px` }} className={`${nodeBaseClass} ${selected ? selectedBorderClass : unselectedBorderClass} flex flex-col p-3`}>
         {/* ★ 节点头部 — 黑色液态玻璃风格 */}
         <div className="flex items-center gap-2 mb-3 pb-2 border-b border-white/[0.06]">
-          <Globe size={14} className="text-emerald-400" />
+          <Globe size={14} className="text-zinc-400" />
           <span className="text-[11px] font-bold text-white tracking-widest uppercase">全景图</span>
-          {status === 'generating' && <Loader2 size={12} className="text-emerald-400 animate-spin ml-auto" />}
-          {status === 'done' && <CheckCircle size={12} className="text-emerald-400 ml-auto" />}
-          {status === 'failed' && <X size={12} className="text-red-400 ml-auto" />}
+          {status === 'generating' && <Loader2 size={12} className="text-zinc-400 animate-spin ml-auto" />}
+          {status === 'done' && <CheckCircle size={12} className="text-zinc-400 ml-auto" />}
+          {status === 'failed' && <X size={12} className="text-zinc-400 ml-auto" />}
         </div>
 
         {/* 预览区域 */}
@@ -4282,18 +4282,18 @@ const _PanoramaNode = ({ id, data, selected }: any) => {
               </div>
             </div>
           ) : status === 'generating' ? (
-            <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-emerald-950/10 to-blue-950/10">
-              <Loader2 size={24} className="text-emerald-400 animate-spin" />
+            <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-white/[0.02] to-white/[0.04]">
+              <Loader2 size={24} className="text-zinc-400 animate-spin" />
               <span className="text-zinc-500 text-[11px]">生成全景图中...</span>
             </div>
           ) : status === 'failed' ? (
-            <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-red-950/10 to-orange-950/10">
-              <X size={24} className="text-red-400" />
+            <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-white/[0.02] to-white/[0.04]">
+              <X size={24} className="text-zinc-400" />
               <span className="text-zinc-500 text-[11px]">生成失败，请重试</span>
             </div>
           ) : (
-            <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-emerald-950/10 to-blue-950/10">
-              <Globe size={24} className="text-emerald-500/20" />
+            <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-gradient-to-br from-white/[0.02] to-white/[0.04]">
+              <Globe size={24} className="text-white/10" />
               <span className="text-zinc-600 text-[11px]">输入场景描述后点击生成</span>
             </div>
           )}
@@ -4314,7 +4314,7 @@ const _PanoramaNode = ({ id, data, selected }: any) => {
                   }}
                   className={`flex-1 flex items-center justify-center gap-1 px-2 py-1 rounded-[6px] text-[10px] font-medium transition-all ${
                     panoramaMode === m
-                      ? 'bg-emerald-500/20 text-emerald-300'
+                      ? 'bg-white/[0.08] text-zinc-200'
                       : 'text-zinc-600 hover:text-zinc-400'
                   }`}
                 >
@@ -4331,7 +4331,7 @@ const _PanoramaNode = ({ id, data, selected }: any) => {
             value={data.prompt || ''}
             onChange={(e) => updateNodeData(id, { prompt: e.target.value })}
             placeholder="描述全景场景..."
-            className="w-full bg-[#0a0a0c]/60 backdrop-blur-sm border border-white/[0.06] rounded-[10px] p-2.5 text-[11px] text-zinc-300 placeholder:text-zinc-600 outline-none resize-none h-14 focus:border-emerald-500/30 transition-all nodrag nopan"
+            className="w-full bg-[#0a0a0c]/60 backdrop-blur-sm border border-white/[0.06] rounded-[10px] p-2.5 text-[11px] text-zinc-300 placeholder:text-zinc-600 outline-none resize-none h-14 focus:border-white/20 transition-all nodrag nopan"
             onWheelCapture={(e) => e.stopPropagation()}
           />
 
@@ -4372,7 +4372,7 @@ const _PanoramaNode = ({ id, data, selected }: any) => {
           <button
             onClick={handleGenerate}
             disabled={isGenerating || status === 'generating'}
-            className="w-full py-2.5 rounded-[12px] bg-emerald-500/10 backdrop-blur-sm border border-emerald-500/20 text-emerald-400 text-[12px] font-bold hover:bg-emerald-500/20 hover:border-emerald-500/30 transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-[0_8px_32px_rgba(16,185,129,0.06)]"
+            className="w-full py-2.5 rounded-[12px] bg-white/[0.06] backdrop-blur-sm border border-white/[0.1] text-zinc-300 text-[12px] font-bold hover:bg-white/[0.1] hover:border-white/[0.15] transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-[0_8px_32px_rgba(0,0,0,0.3)]"
           >
             {status === 'generating' ? (
               <><Loader2 size={13} className="animate-spin" /> 生成中...</>

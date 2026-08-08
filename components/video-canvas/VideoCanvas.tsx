@@ -802,7 +802,7 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
       {/* ========================================== */}
       {typeof window !== 'undefined' && createPortal(
         <div 
-          className={`fixed top-24 left-6 bottom-24 w-[360px] z-[999999] rounded-[32px] bg-[#050507]/90 backdrop-blur-3xl border border-white/[0.08] shadow-[0_30px_100px_rgba(0,0,0,0.95),inset_0_1px_1px_rgba(255,255,255,0.08)] flex flex-col overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+          className={`fixed top-24 left-[84px] bottom-24 w-[360px] z-[999999] rounded-[32px] bg-[#050507]/90 backdrop-blur-3xl border border-white/[0.08] shadow-[0_30px_100px_rgba(0,0,0,0.95),inset_0_1px_1px_rgba(255,255,255,0.08)] flex flex-col overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] ${
             isFilmControlOpen ? 'opacity-100 translate-x-0 pointer-events-auto' : 'opacity-0 -translate-x-12 pointer-events-none'
           }`}
           onClick={e => e.stopPropagation()}
@@ -1113,7 +1113,7 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
       </ReactFlow>
 
       {/* 左上角：原位极简编辑框 + 保存指示灯（返回按钮已上移至 WorkspaceApp 层级，确保加载时始终可见） */}
-      <div className="absolute top-6 left-6 z-50 flex items-center gap-3">
+      <div className="absolute top-6 left-20 z-50 flex items-center gap-3">
         
         {/* ✨ 新增：中控台一键开关 Pill 按钮 */}
         <button 

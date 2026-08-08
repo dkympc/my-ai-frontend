@@ -110,7 +110,7 @@ const _DirectorStageNode = ({ id, data, selected }: DirectorStageNodeProps) => {
 
       <div style={{ width: '340px' }} className={`${nodeBaseClass} ${selected ? selectedBorderClass : unselectedBorderClass} flex flex-col p-4`}>
         <div className="flex items-center gap-2 mb-3 pb-2 border-b border-white/[0.06]">
-          <Clapperboard size={14} className="text-violet-400" />
+          <Clapperboard size={14} className="text-zinc-400" />
           <span className="text-[11px] font-bold text-white tracking-widest uppercase">导演台</span>
           <div className="ml-auto flex items-center gap-1.5">
             {charCount > 0 && <span className="text-[9px] text-zinc-500 bg-white/5 px-1.5 py-0.5 rounded-full">{charCount} 角色</span>}
@@ -125,7 +125,7 @@ const _DirectorStageNode = ({ id, data, selected }: DirectorStageNodeProps) => {
               {(['360', '720', 'flat'] as PanoramaMode[]).map((mode) => (
                 <button key={mode} onClick={() => handleModeChange(mode)}
                   title={mode === '360' ? '360°圆柱全景' : mode === '720' ? '720°球体全景' : '平面背景'}
-                  className={`flex items-center gap-1 px-2 py-1 rounded-[6px] text-[9px] font-medium transition-all ${panoramaMode === mode ? 'bg-violet-500/20 text-violet-300' : 'text-zinc-600 hover:text-zinc-400'}`}>
+                  className={`flex items-center gap-1 px-2 py-1 rounded-[6px] text-[9px] font-medium transition-all ${panoramaMode === mode ? 'bg-white/[0.08] text-zinc-200' : 'text-zinc-600 hover:text-zinc-400'}`}>
                   {mode === '360' ? <Globe size={10} /> : mode === '720' ? <Globe size={10} /> : <Monitor size={10} />}
                   {mode === '360' ? '360°' : mode === '720' ? '720°' : '平面'}
                 </button>
@@ -138,14 +138,14 @@ const _DirectorStageNode = ({ id, data, selected }: DirectorStageNodeProps) => {
               <img src={backgroundUrl} alt="场景背景" className="w-full h-full object-cover" />
               <div className="absolute top-2 left-2 flex items-center gap-1">
                 {edgeBackgroundUrl
-                  ? <span className="bg-emerald-500/20 backdrop-blur-sm border border-emerald-500/30 text-emerald-400 text-[9px] px-2 py-0.5 rounded-full flex items-center gap-1"><Link2 size={9} /> 连线传入</span>
-                  : <span className="bg-violet-500/20 backdrop-blur-sm border border-violet-500/30 text-violet-400 text-[9px] px-2 py-0.5 rounded-full flex items-center gap-1"><Upload size={9} /> 已上传</span>}
+                  ? <span className="bg-white/[0.06] backdrop-blur-sm border border-white/[0.1] text-zinc-300 text-[9px] px-2 py-0.5 rounded-full flex items-center gap-1"><Link2 size={9} /> 连线传入</span>
+                  : <span className="bg-white/[0.06] backdrop-blur-sm border border-white/[0.1] text-zinc-300 text-[9px] px-2 py-0.5 rounded-full flex items-center gap-1"><Upload size={9} /> 已上传</span>}
               </div>
               <button onClick={() => fileInputRef.current?.click()} className="absolute top-2 right-2 bg-[#0a0a0c]/80 backdrop-blur-md border border-white/[0.08] text-zinc-400 hover:text-white text-[9px] px-2 py-1 rounded-full transition-all">更换</button>
             </div>
           ) : (
-            <div onClick={() => fileInputRef.current?.click()} className="rounded-[12px] border-2 border-dashed border-white/[0.08] hover:border-violet-500/30 bg-[#0a0a0c]/40 aspect-video mb-2 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all group/upload">
-              <Upload size={20} className="text-zinc-600 group-hover/upload:text-violet-400 transition-colors" />
+            <div onClick={() => fileInputRef.current?.click()} className="rounded-[12px] border-2 border-dashed border-white/[0.08] hover:border-white/20 bg-[#0a0a0c]/40 aspect-video mb-2 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all group/upload">
+              <Upload size={20} className="text-zinc-600 group-hover/upload:text-zinc-300 transition-colors" />
               <span className="text-[10px] text-zinc-600 group-hover/upload:text-zinc-400 transition-colors">点击上传场景图</span>
               <span className="text-[9px] text-zinc-700">或从其他节点连线传入</span>
             </div>
@@ -153,7 +153,7 @@ const _DirectorStageNode = ({ id, data, selected }: DirectorStageNodeProps) => {
           <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
           <div className="flex items-center gap-1.5 text-[9px]">
             {edgeBackgroundUrl
-              ? <span className="text-emerald-500 flex items-center gap-1"><CheckCircle2 size={10} /> 已通过连线接收场景图</span>
+              ? <span className="text-zinc-300 flex items-center gap-1"><CheckCircle2 size={10} /> 已通过连线接收场景图</span>
               : <span className="text-zinc-600 flex items-center gap-1"><Link2 size={10} /> 左侧接口：连线其他节点传入场景图</span>}
           </div>
         </div>
@@ -171,7 +171,7 @@ const _DirectorStageNode = ({ id, data, selected }: DirectorStageNodeProps) => {
 
         <div className="flex gap-2">
           <button onClick={() => setShowEditor(true)} disabled={!hasBackground}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-[12px] bg-violet-500/10 backdrop-blur-sm border border-violet-500/20 text-violet-400 text-[12px] font-bold hover:bg-violet-500/20 hover:border-violet-500/30 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-[12px] bg-white/[0.06] backdrop-blur-sm border border-white/[0.1] text-zinc-300 text-[12px] font-bold hover:bg-white/[0.1] hover:border-white/[0.15] transition-all disabled:opacity-30 disabled:cursor-not-allowed"
             title={!hasBackground ? '请先上传场景图或连线传入场景图' : ''}><Clapperboard size={13} /> 打开导演台</button>
         </div>
       </div>
