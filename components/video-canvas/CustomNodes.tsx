@@ -35,11 +35,12 @@ function useMediaDimensions(url?: string) {
 // ★ 画布 LLM 模型白名单（与 constants.tsx MODELS 同步，用于过滤掉生图/生视频模型）
 const LLM_MODEL_IDS = ['deepseek-v4-pro', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gemini-3.1-pro-preview', 'gemini-3.5-flash', 'gemini-3.6-flash', 'kimi-k2.6', 'claude-haiku-4-5-20251001-thinking'];
 
-// ★ 统一 LLM 模型解析：① 节点自选模型（仅当是有效 LLM 模型时）→ ② 中控台全局默认 → ③ 硬兜底
+// ★ 统一 LLM 模型解析：① 中控台全局默认（优先）→ ② 节点自选模型 → ③ 硬兜底
 const resolveLLMModel = (data: any): string => {
-  // ★ 节点 data.model 可能是生图或生视频模型（历史遗留），必须做白名单校验
+  const globalModel = useAppStore.getState().canvasSettings?.defaultLLMModel;
+  if (globalModel && LLM_MODEL_IDS.includes(globalModel)) return globalModel;
   if (data.model && LLM_MODEL_IDS.includes(data.model)) return data.model;
-  return useAppStore.getState().canvasSettings?.defaultLLMModel || 'deepseek-v4-pro';
+  return 'deepseek-v4-pro';
 };
 
 // ✨ 放在 CustomNodes.tsx 文件顶部 imports 区域下方
@@ -111,6 +112,15 @@ const fetchStreamingChat = async (payload: any, onChunk?: (text: string) => void
   try {
     const requestBody = { ...payload, _source: 'canvas', stream: true };
     console.log('[DEBUG][fetchStreamingChat] 发送请求体:', JSON.stringify({ model: requestBody.model, reasoning_effort: requestBody.reasoning_effort, thinking: requestBody.thinking, temperature: requestBody.temperature, prompt_type: requestBody.prompt_type, stream: requestBody.stream, userLen: (requestBody.user_content || '').length }, null, 2));
+    // ★ [Debug] 裂变请求时打印完整 user_content 首尾，排查上下文是否正确
+    if (requestBody.prompt_type === 'fission-stage1') {
+      const uc = requestBody.user_content || '';
+      console.log('[DEBUG][fission-stage1 user_content]', {
+        totalLen: uc.length,
+        head: uc.slice(0, 500),
+        tail: uc.slice(-500),
+      });
+    }
     console.log('[Canvas Stream Debug] 请求开始:', {
       model: requestBody.model,
       prompt_type: requestBody.prompt_type,
@@ -177,6 +187,14 @@ const fetchStreamingChat = async (payload: any, onChunk?: (text: string) => void
           if (content) {
             fullText += content;
             if (onChunk) onChunk(fullText);
+          }
+          // ★ [Debug] 捕获 finish_reason，排查 DeepSeek 截断问题
+          const finishReason = parsed.choices?.[0]?.finish_reason;
+          if (finishReason) {
+            console.log(`[Canvas Stream Debug] finish_reason=${finishReason} | 已收集文本长度=${fullText.length} | prompt_type=${requestBody.prompt_type}`);
+            if (finishReason === 'length') {
+              console.warn(`[Canvas Stream Debug] ⚠️ 模型输出被截断！finish_reason=length | 已收集${fullText.length}字符 | 可能原因：max_tokens不足或上游限制`);
+            }
           }
         } catch {
           // 忽略解析失败的行
@@ -543,7 +561,7 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       // ★ 流式请求：不再用 Toast 蹦代码，统一走进度条
       const cameraParams = (await fetchStreamingChat(payload, undefined, abortController.signal)).trim() || "Shot on 35mm lens, cinematic lighting, 8k resolution";
       
-      updateNodeData(id, { globalCamera: cameraParams, model: targetModel });
+      updateNodeData(id, { globalCamera: cameraParams });
       useAppStore.getState().setFissionProgress({ status: 'idle', phase: '', mode: 'generating' });
       useAppStore.getState().setToastMsg(`✅ 全局摄影机 & 调性已锁定！`);
     } catch (error: any) {
@@ -796,13 +814,42 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
 
 
   const handleFissionShots = async () => {
-    // ★ 防止重复点击：正在裂变时禁止再次触发
-    if (data.isGenerating || !selectedText) return;
+    // ★ 修复：从 textarea ref 实时读取选区，不依赖可能过期的 React state
+    const ta = textareaRef.current;
+    const realSelStart = ta?.selectionStart ?? selectionRange.start;
+    const realSelEnd = ta?.selectionEnd ?? selectionRange.end;
+    const realSelectedText = ta ? ta.value.substring(realSelStart, realSelEnd) : selectedText;
+
+    // ★ 防止重复点击：正在裂变时禁止再次触发（用实时选区值校验）
+    if (data.isGenerating || !realSelectedText) return;
     if (useAppStore.getState().fissionProgress.status !== 'idle') {
       useAppStore.getState().setToastMsg("⚠️ 分镜裂变正在进行中，请等待完成或点击中止");
       return;
     }
     updateNodeData(id, { isGenerating: true });
+
+    // ★ [Debug] 选区诊断：独立日志，方便直接查看
+    console.log('[DEBUG][SelectionDiagnostic]', {
+      stored_vs_real: {
+        storedRange: { start: selectionRange.start, end: selectionRange.end },
+        realRange: { start: realSelStart, end: realSelEnd },
+        MISMATCH: realSelStart !== selectionRange.start || realSelEnd !== selectionRange.end ? '⚠️ 选区不一致！' : '✅ 一致',
+      },
+      selectedText_len: realSelectedText.length,
+      selectedText_head: realSelectedText.slice(0, 300),
+      selectedText_tail: realSelectedText.slice(-300),
+      fullText_len: (data.text || '').length,
+      beforeText_extract: realSelStart > 0 
+        ? (data.text || '').substring(Math.max(0, realSelStart - 1500), realSelStart).slice(-300)
+        : '(选区从0开始)',
+      afterText_extract: realSelEnd < (data.text || '').length
+        ? (data.text || '').substring(realSelEnd, Math.min(realSelEnd + 300, data.text.length))
+        : '(选区到末尾)',
+      // ★ 目标文本完整内容（截断到1000字避免日志过大）
+      targetText_full: realSelectedText.length > 1000 
+        ? realSelectedText.slice(0, 500) + '\n...(中间省略)...\n' + realSelectedText.slice(-500)
+        : realSelectedText,
+    });
 
     // ★ 创建 AbortController：支持用户手动中止 + 5 分钟超时兜底
     const abortController = new AbortController();
@@ -863,13 +910,13 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       console.log('[Canvas Fission Debug] Stage 1 start', {
         nodeId: id,
         model: targetModel,
-        selectedTextLength: selectedText?.length || 0,
+        selectedTextLength: realSelectedText?.length || 0,
         fullTextLength: data.text?.length || 0,
-        isFullScript: !selectedText || selectedText.trim() === (data.text || '').trim(),
+        isFullScript: !realSelectedText || realSelectedText.trim() === (data.text || '').trim(),
         existingShotsCount: existingShots.length,
         directorEnabled: !!directorCtx,
         directorGenre: canvasSettings?.directorGenre || 'default',
-        directorTempo: canvasSettings?.directorTempo || ''
+        directorTempo: canvasSettings?.directorTempo || '',
       });
       // ★ 用顶部进度条替代 Toast 显示 LLM 原始输出
       useAppStore.getState().setFissionProgress({ status: 'stage1', phase: '分镜拆解中...', mode: 'generating' });
@@ -877,11 +924,12 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
         model: targetModel,
         // ★ DeepSeek V4 Pro：分镜属于长链路推理任务，优先走 max 思考强度
         // 这里不再强行关闭 thinking，避免把模型压回普通输出路径，导致 stage1 卡在半截 JSON
-        ...(targetModel === 'deepseek-v4-pro' ? { thinking: { type: "disabled" } } : {}),
-        // ★ GPT-5.4 系列：API易要求 temperature=1，用 reasoning_effort 控制推理深度（thinking: {type:enabled} 不被上游强制执行预算）
-        ...(['gpt-5.4-mini', 'gpt-5.4-nano'].includes(targetModel) ? { reasoning_effort: "low", temperature: 1 } : {}),
-        // ★ Kimi 2.6：保留 thinking 但降低预算（Kimi 无 temperature=1 限制）
-        ...(['kimi-k2.6'].includes(targetModel) ? { thinking: { type: "enabled", budget_tokens: 8000 } } : {}),
+        ...(targetModel === 'deepseek-v4-pro' ? { thinking: { type: "disabled" }, max_tokens: 65536 } : {}),
+        // ★ GPT-5.4 系列：temperature 对该系列非法（推理模型不支持），仅设 reasoning_effort 控制推理深度
+        // mini: low（防分镜过碎）  nano: medium（low 下会吞内容，只出一个镜）
+        ...(targetModel === 'gpt-5.4-mini' ? { reasoning_effort: "low" } : targetModel === 'gpt-5.4-nano' ? { reasoning_effort: "medium" } : {}),
+        // ★ Kimi 2.6：thinking 预算 32000（16000 仍不够处理长提示词+结构化JSON），加 temperature 稳定输出
+        ...(['kimi-k2.6'].includes(targetModel) ? { thinking: { type: "enabled", budget_tokens: 32000 }, temperature: 0.3 } : {}),
         prompt_type: "fission-stage1",
         params: {
           NEXT_SHOT_START: nextShotStart,
@@ -889,37 +937,42 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
         },
         user_content: (() => {
           const fullText = data.text || '';
-          const targetText = selectedText || fullText;
-          const isFullScript = !selectedText || selectedText.trim() === fullText.trim();
+          const targetText = realSelectedText || fullText;
+          const isFullScript = !realSelectedText || realSelectedText.trim() === fullText.trim();
           
           let scriptContext = '';
           if (!isFullScript) {
-            const selStart = selectionRange.start;
-            const selEnd = selectionRange.end;
+            const selStart = realSelStart;
+            const selEnd = realSelEnd;
             if (fullText.length > 10000 && data.scriptSummary) {
-              scriptContext = `【全剧本故事大纲/大体脉络】：\n${data.scriptSummary}\n`;
+              scriptContext = `全剧本故事大纲：${data.scriptSummary}`;
             } else {
               const beforeText = selStart > 0 ? fullText.substring(Math.max(0, selStart - 1500), selStart) : '';
               const afterText = selEnd < fullText.length ? fullText.substring(selEnd, Math.min(selEnd + 1500, fullText.length)) : '';
-              if (beforeText) scriptContext += `【前情回顾】：\n${beforeText}\n`;
-              if (afterText) scriptContext += `\n【后续剧情线索】：\n${afterText}\n`;
+              if (beforeText) scriptContext += `前情：${beforeText}`;
+              if (afterText) scriptContext += `\n后续：${afterText}`;
             }
           }
 
+          // ★ 组装参考上下文（仅供理解，严禁拆分）
+          let referenceParts: string[] = [];
+          if (scriptContext) referenceParts.push(scriptContext);
+          if (existingShotsSummary) referenceParts.push(`画布已有分镜索引：${existingShotsSummary}`);
+          if (dictText) referenceParts.push(dictText);
+          if (data.globalCamera) referenceParts.push(`全局摄影参数：${data.globalCamera}`);
+
           let promptBody = '';
-          if (scriptContext) {
-            promptBody += `${scriptContext}\n`;
+          if (referenceParts.length > 0) {
+            promptBody += '═══════════════════════════════════════\n';
+            promptBody += '⚠️ 以下为「参考上下文」，仅供理解剧情脉络，严禁拆分为分镜！\n';
+            promptBody += '═══════════════════════════════════════\n';
+            promptBody += referenceParts.join('\n\n');
+            promptBody += '\n═══════════════════════════════════════\n\n';
           }
-          if (existingShotsSummary) {
-            promptBody += `【画布已有分镜索引（供延续空间站位与逻辑）】：\n${existingShotsSummary}\n\n`;
-          }
-          if (dictText) {
-            promptBody += `${dictText}\n\n`;
-          }
-          if (data.globalCamera) {
-            promptBody += `【全局摄影参数】：\n${data.globalCamera}\n\n`;
-          }
-          promptBody += `【★ 必须 100% 完整拆分为分镜的剧本文本】：\n${targetText}`;
+          promptBody += '⚠️ 以下为「目标文本」，仅拆分此部分：\n';
+          promptBody += '═══════════════════════════════════════\n';
+          promptBody += targetText;
+          promptBody += '\n═══════════════════════════════════════';
 
           return promptBody;
         })()
@@ -956,7 +1009,8 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       if (!raw1) throw new Error("阶段1：LLM未返回有效内容");
       console.log('[Canvas Fission Debug] Stage 1 raw1 received', {
         length: raw1.length,
-        preview: raw1.slice(0, 500)
+        preview: raw1.slice(0, 500),
+        tail: raw1.slice(-500)
       });
       let cleanJson1 = raw1;
       const match1 = raw1.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
@@ -970,7 +1024,8 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       console.log('[Canvas Fission Debug] Stage 1 cleaned JSON candidate', {
         length: cleanJson1.length,
         hasCodeFence: !!match1,
-        preview: cleanJson1.slice(0, 500)
+        preview: cleanJson1.slice(0, 500),
+        tail: cleanJson1.slice(-500)
       });
       
       // ★ JSON 修复兜底：LLM 偶尔输出畸形 JSON（尾逗号/未转义引号/注释等），先尝试直接解析，失败则逐层修复
@@ -1064,9 +1119,9 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
         const payloadStage2 = {
           model: targetModel,
         // ★ DeepSeek V4 Pro：第二阶段也沿用 max 思考强度，保持与 stage1 同一条稳定链路
-        ...(targetModel === 'deepseek-v4-pro' ? { thinking: { type: "disabled" } } : {}),
-        ...(['gpt-5.4-mini', 'gpt-5.4-nano'].includes(targetModel) ? { reasoning_effort: "low", temperature: 1 } : {}),
-        ...(['kimi-k2.6'].includes(targetModel) ? { thinking: { type: "enabled", budget_tokens: 8000 } } : {}),
+        ...(targetModel === 'deepseek-v4-pro' ? { thinking: { type: "disabled" }, max_tokens: 32768 } : {}),
+        ...(targetModel === 'gpt-5.4-mini' ? { reasoning_effort: "low" } : targetModel === 'gpt-5.4-nano' ? { reasoning_effort: "medium" } : {}),
+        ...(['kimi-k2.6'].includes(targetModel) ? { thinking: { type: "enabled", budget_tokens: 32000 }, temperature: 0.3 } : {}),
         prompt_type: "fission-stage2",
           params: {},
           user_content: `【照抄用的英文全局摄影参数】：\n${data.globalCamera}\n\n【需提取首帧图的已拆解分镜结构数组(含已由上级严格定义的shotLighting和物理动作)】：\n${JSON.stringify(json1.shots, null, 2)}`
