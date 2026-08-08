@@ -123,9 +123,9 @@ const _DirectorStageNode = ({ id, data, selected }: DirectorStageNodeProps) => {
             <div className="flex-1" />
             <div className="flex items-center gap-0.5 bg-[#0a0a0c]/60 border border-white/[0.06] rounded-[8px] p-0.5">
               {(['360', '720', 'flat'] as PanoramaMode[]).map((mode) => (
-                <button key={mode} onClick={() => handleModeChange(mode)} disabled={mode === '720'}
-                  title={mode === '720' ? '720° 球体模式即将推出' : mode === '360' ? '360°圆柱全景' : '平面背景'}
-                  className={`flex items-center gap-1 px-2 py-1 rounded-[6px] text-[9px] font-medium transition-all ${panoramaMode === mode ? 'bg-violet-500/20 text-violet-300' : 'text-zinc-600 hover:text-zinc-400'} ${mode === '720' ? 'opacity-30 cursor-not-allowed' : ''}`}>
+                <button key={mode} onClick={() => handleModeChange(mode)}
+                  title={mode === '360' ? '360°圆柱全景' : mode === '720' ? '720°球体全景' : '平面背景'}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-[6px] text-[9px] font-medium transition-all ${panoramaMode === mode ? 'bg-violet-500/20 text-violet-300' : 'text-zinc-600 hover:text-zinc-400'}`}>
                   {mode === '360' ? <Globe size={10} /> : mode === '720' ? <Globe size={10} /> : <Monitor size={10} />}
                   {mode === '360' ? '360°' : mode === '720' ? '720°' : '平面'}
                 </button>

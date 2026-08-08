@@ -1639,8 +1639,8 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       )}
 
 
-      {/* 分镜方法横向选择栏（黑色液态玻璃风格） */}
-      <div className={`absolute bottom-[-20px] left-0 right-0 translate-y-full bg-[#0a0a0c]/95 backdrop-blur-3xl border border-white/[0.08] rounded-[20px] shadow-[0_40px_100px_rgba(0,0,0,0.95)] transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] z-[100] ${(!data.globalCamera || selectedText ? 'px-5 py-3 scale-100 opacity-100' : 'scale-90 opacity-0 pointer-events-none')} ${!data.globalCamera ? 'flex justify-center' : ''}`}>
+      {/* 分镜方法横向选择栏（黑色液态玻璃风格）— ★ 固定最小宽度，不受中控台大小影响 */}
+      <div className={`absolute bottom-[-20px] left-1/2 -translate-x-1/2 min-w-[640px] translate-y-full bg-[#0a0a0c]/95 backdrop-blur-3xl border border-white/[0.08] rounded-[20px] shadow-[0_40px_100px_rgba(0,0,0,0.95)] transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] z-[100] ${(!data.globalCamera || selectedText ? 'px-5 py-3 scale-100 opacity-100' : 'scale-90 opacity-0 pointer-events-none')} ${!data.globalCamera ? 'flex justify-center' : ''}`}>
         {!data.globalCamera ? (
           <>
             <button onClick={handleExtractCamera} disabled={data.isExtractingCamera} className="flex items-center justify-center gap-2 px-5 py-2 bg-white/[0.06] border border-white/[0.08] hover:bg-white/[0.1] text-zinc-200 rounded-[12px] text-[12px] font-semibold transition-all whitespace-nowrap nodrag">
@@ -4057,7 +4057,7 @@ const _TextNode = ({ id, data, selected }: any) => {
 export const TextNode = React.memo(_TextNode);
 
 // ==========================================
-// 7. 全景图节点 (PanoramaNode) — 360° 场景环境生成与预览
+// 7. 全景图节点 (PanoramaNode) — 360° 圆柱体 / 720° 球体 场景环境生成与预览
 // ==========================================
 const _PanoramaNode = ({ id, data, selected }: any) => {
   const { updateNodeData, getNodes, setNodes } = useReactFlow();
@@ -4065,6 +4065,9 @@ const _PanoramaNode = ({ id, data, selected }: any) => {
   const nodes = useNodes();
   const [showFullscreen, setShowFullscreen] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  // ★ 全景模式：360 圆柱体 / 720 球体，默认 360 向后兼容
+  const [panoramaMode, setPanoramaMode] = useState<'360' | '720'>(data.panoramaMode || '360');
+  const is720 = panoramaMode === '720';
 
   // 收集入边连线的参考图（用户连线控制参考图来源）
   const incomingRefs = useMemo(() => edges
@@ -4130,24 +4133,33 @@ const _PanoramaNode = ({ id, data, selected }: any) => {
 
       const model = currentModel;
       const quality = data.quality || getImageQualityOptions(model)[0].value;
-      const ratio = data.ratio || '21:9';
+      // ★ 720 模式固定 2:1 equirectangular 比例，360 模式使用用户选择的比例
+      const ratio = is720 ? '2:1' : (data.ratio || '21:9');
 
       // ★ 拼接比例前缀
       let ratioPrefix = '';
       if (model === 'gpt-image-2') {
-        const prefixMap: Record<string, string> = {
-          '21:9': '横版 21:9 超宽全景画幅, ',
-          '32:9': '横版 32:9 超宽全景画幅, ',
-          '16:9': '横版 16:9 电影画幅, ',
-        };
-        ratioPrefix = prefixMap[ratio] || '横版 21:9 超宽全景画幅, ';
+        if (is720) {
+          ratioPrefix = 'equirectangular 全景投影 2:1 画幅, 360度环绕球体全景图, ';
+        } else {
+          const prefixMap: Record<string, string> = {
+            '21:9': '横版 21:9 超宽全景画幅, ',
+            '32:9': '横版 32:9 超宽全景画幅, ',
+            '16:9': '横版 16:9 电影画幅, ',
+          };
+          ratioPrefix = prefixMap[ratio] || '横版 21:9 超宽全景画幅, ';
+        }
       } else {
-        const prefixMap: Record<string, string> = {
-          '21:9': 'ultrawide 21:9 panoramic, ',
-          '32:9': 'ultrawide 32:9 panoramic, ',
-          '16:9': 'widescreen 16:9, ',
-        };
-        ratioPrefix = prefixMap[ratio] || 'ultrawide 21:9 panoramic, ';
+        if (is720) {
+          ratioPrefix = 'equirectangular panorama 2:1, 360-degree spherical panorama, seamless tiling, ';
+        } else {
+          const prefixMap: Record<string, string> = {
+            '21:9': 'ultrawide 21:9 panoramic, ',
+            '32:9': 'ultrawide 32:9 panoramic, ',
+            '16:9': 'widescreen 16:9, ',
+          };
+          ratioPrefix = prefixMap[ratio] || 'ultrawide 21:9 panoramic, ';
+        }
       }
 
       const payload: any = {
@@ -4171,6 +4183,8 @@ const _PanoramaNode = ({ id, data, selected }: any) => {
           '3:4':  { '2K': '1774x2364', '3K': '2304x3072' },
           '21:9': { '2K': '3136x1344', '3K': '3584x1536' },
           '32:9': { '2K': '4096x1152', '3K': '5120x1440' },
+          // ★ 720° equirectangular 2:1 比例（Seedream 5.0 支持的自定义尺寸）
+          '2:1':  { '2K': '3072x1536', '3K': '4096x2048' },
         };
         const grade = quality.includes('3K') ? '3K' : '2K';
         payload.size = (seedreamSizeMap[ratio] || seedreamSizeMap['16:9'])[grade];
@@ -4201,8 +4215,8 @@ const _PanoramaNode = ({ id, data, selected }: any) => {
       }
 
       if (url) {
-        updateNodeData(id, { status: 'done', resultUrl: url, frameUrl: url });
-        useAppStore.getState().setToastMsg('✅ 全景图生成成功！点击图片查看 360° 全景');
+        updateNodeData(id, { status: 'done', resultUrl: url, frameUrl: url, panoramaMode });
+        useAppStore.getState().setToastMsg(is720 ? '✅ 720° 球体全景图生成成功！点击查看' : '✅ 全景图生成成功！点击图片查看 360° 全景');
       } else {
         throw new Error('API 未返回全景图 URL');
       }
@@ -4259,11 +4273,11 @@ const _PanoramaNode = ({ id, data, selected }: any) => {
             <div className="w-full h-full relative cursor-pointer group/img" onClick={() => setShowFullscreen(true)}>
               <img src={displayImage} alt="全景图" className="w-full h-full object-cover" />
               <div className="absolute top-2 right-2 bg-[#0a0a0c]/80 backdrop-blur-md border border-white/[0.08] text-white text-[10px] px-2 py-0.5 rounded-full font-mono flex items-center gap-1">
-                <Maximize size={10} /> 360°
+                <Maximize size={10} /> {is720 ? '720°' : '360°'}
               </div>
               <div className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover/img:bg-black/30 transition-all">
                 <span className="opacity-0 group-hover/img:opacity-100 text-white text-xs font-medium bg-[#0a0a0c]/80 backdrop-blur-md border border-white/[0.08] px-4 py-1.5 rounded-full transition-all">
-                  点击查看 360° 全景
+                  {is720 ? '点击查看 720° 球体全景' : '点击查看 360° 全景'}
                 </span>
               </div>
             </div>
@@ -4287,6 +4301,30 @@ const _PanoramaNode = ({ id, data, selected }: any) => {
 
         {/* ★ 配置区域 — 黑色液态玻璃统一风格 */}
         <div className="flex flex-col gap-2.5">
+          {/* ★ 全景模式切换：360°圆柱 / 720°球体 */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-zinc-500 font-medium shrink-0">模式</span>
+            <div className="flex items-center gap-0.5 bg-[#0a0a0c]/60 border border-white/[0.06] rounded-[8px] p-0.5 flex-1">
+              {(['360', '720'] as const).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => {
+                    setPanoramaMode(m);
+                    updateNodeData(id, { panoramaMode: m });
+                  }}
+                  className={`flex-1 flex items-center justify-center gap-1 px-2 py-1 rounded-[6px] text-[10px] font-medium transition-all ${
+                    panoramaMode === m
+                      ? 'bg-emerald-500/20 text-emerald-300'
+                      : 'text-zinc-600 hover:text-zinc-400'
+                  }`}
+                >
+                  <Globe size={10} />
+                  {m === '360' ? '360° 圆柱' : '720° 球体'}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* 场景描述 */}
           <textarea
             data-node-id={id} data-field="prompt" data-field-label="场景描述"
@@ -4309,18 +4347,21 @@ const _PanoramaNode = ({ id, data, selected }: any) => {
               ]}
               onChange={handleModelChange}
             />
+            {/* ★ 720 模式固定 2:1 比例，隐藏比例选择器 */}
+            {!is720 && (
+              <CustomSelect
+                className="flex-[1] min-w-0"
+                value={data.ratio || '21:9'}
+                options={[
+                  { value: '21:9', label: '21:9' },
+                  { value: '32:9', label: '32:9' },
+                  { value: '16:9', label: '16:9' },
+                ]}
+                onChange={(v: string) => updateNodeData(id, { ratio: v })}
+              />
+            )}
             <CustomSelect
-              className="flex-[1] min-w-0"
-              value={data.ratio || '21:9'}
-              options={[
-                { value: '21:9', label: '21:9' },
-                { value: '32:9', label: '32:9' },
-                { value: '16:9', label: '16:9' },
-              ]}
-              onChange={(v: string) => updateNodeData(id, { ratio: v })}
-            />
-            <CustomSelect
-              className="flex-[1] min-w-0"
+              className={is720 ? 'flex-[1] min-w-0' : 'flex-[1] min-w-0'}
               value={data.quality || getImageQualityOptions(currentModel)[0].value}
               options={getImageQualityOptions(currentModel)}
               onChange={(v: string) => updateNodeData(id, { quality: v })}
@@ -4342,10 +4383,11 @@ const _PanoramaNode = ({ id, data, selected }: any) => {
         </div>
       </div>
 
-      {/* ★ 全屏 360° 查看器 — Portal 到 body 避开 ReactFlow 事件劫持 */}
+      {/* ★ 全屏查看器 — Portal 到 body 避开 ReactFlow 事件劫持 */}
       {showFullscreen && displayImage && createPortal(
         <PanoramaViewer
           imageUrl={displayImage}
+          mode={panoramaMode}
           onCapture={handleCapture}
           onClose={() => setShowFullscreen(false)}
         />,

@@ -7,6 +7,60 @@ import * as THREE from 'three';
 import { Loader2, Camera, X } from 'lucide-react';
 
 // ==========================================
+// 720° 球体全景场景
+// ★ 完整球体包裹，图片 equirectangular 投影到球体内壁
+// ★ 复用导演台 DirectorStageEditor 的 Sphere720Bg 逻辑
+// ★ BackSide 渲染，用户站在球心环顾四周
+// ==========================================
+function PanoramaSphere({ imageUrl, onReady }: { imageUrl: string; onReady: () => void }) {
+  const [tex, setTex] = useState<THREE.Texture | null>(null);
+  const [loadErr, setLoadErr] = useState(false);
+  const { gl } = useThree();
+
+  useEffect(() => {
+    new THREE.TextureLoader().load(
+      imageUrl,
+      (t) => {
+        t.colorSpace = THREE.SRGBColorSpace;
+        t.minFilter = THREE.LinearMipmapLinearFilter;
+        t.magFilter = THREE.LinearFilter;
+        t.generateMipmaps = true;
+        t.anisotropy = gl.capabilities.getMaxAnisotropy?.() || 4;
+        setTex(t);
+        onReady();
+      },
+      undefined,
+      () => { setLoadErr(true); onReady(); }
+    );
+  }, [imageUrl]);
+
+  return (
+    <>
+      <mesh>
+        <sphereGeometry args={[60, 128, 64]} />
+        {tex ? (
+          <meshBasicMaterial map={tex} side={THREE.BackSide} toneMapped={false} />
+        ) : (
+          <meshBasicMaterial color={loadErr ? '#331111' : '#0a0a14'} side={THREE.BackSide} />
+        )}
+      </mesh>
+      {/* ★ 720° 球体：上下可看天看地，全景无死角 */}
+      <OrbitControls
+        enablePan={false}
+        enableZoom={true}
+        minDistance={0.5}
+        maxDistance={15}
+        minPolarAngle={0.05}
+        maxPolarAngle={Math.PI * 0.95}
+        rotateSpeed={0.5}
+        zoomSpeed={1}
+        target={[0, 0, 0]}
+      />
+    </>
+  );
+}
+
+// ==========================================
 // 360° 全景圆柱体场景
 // ★ 完整圆柱体（360°），图片环绕包裹内壁
 // ★ 大半径 60 减少弧面感，高度按宽高比自适应
@@ -72,13 +126,14 @@ function PanoramaCylinder({ imageUrl, onReady }: { imageUrl: string; onReady: ()
           )}
         </mesh>
       )}
+      {/* ★ 360° 圆柱体：锁定垂直旋转，仅水平环视 */}
       <OrbitControls
         enablePan={false}
         enableZoom={true}
         minDistance={0.5}
         maxDistance={15}
-        minPolarAngle={Math.PI * 0.2}
-        maxPolarAngle={Math.PI * 0.8}
+        minPolarAngle={Math.PI * 0.5}
+        maxPolarAngle={Math.PI * 0.5}
         rotateSpeed={0.5}
         zoomSpeed={1}
         target={[0, 0, 0]}
@@ -89,15 +144,18 @@ function PanoramaCylinder({ imageUrl, onReady }: { imageUrl: string; onReady: ()
 
 // ==========================================
 // 全景查看器主组件
+// ★ 支持 360° 圆柱体 和 720° 球体 两种模式
 // ★ 黑色液态玻璃 UI 风格统一
 // ==========================================
 interface PanoramaViewerProps {
   imageUrl: string;
+  mode?: '360' | '720';  // ★ 默认 360 圆柱体，720 使用球体渲染
   onCapture?: (dataUrl: string) => void;
   onClose?: () => void;
 }
 
-const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ imageUrl, onCapture, onClose }) => {
+const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ imageUrl, mode = '360', onCapture, onClose }) => {
+  const is720 = mode === '720';
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [capturing, setCapturing] = useState(false);
@@ -152,7 +210,7 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ imageUrl, onCapture, on
       {/* ★ 底部提示 */}
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
         <span className="text-white/20 text-xs bg-[#0a0a0c]/60 backdrop-blur-md px-4 py-1.5 rounded-full border border-white/[0.04]">
-          拖拽旋转 · 滚轮缩放 · 点击截取导出当前画面
+          {is720 ? '720° 球体全景 · 拖拽旋转 · 滚轮缩放 · 上下看天看地' : '拖拽旋转 · 滚轮缩放 · 点击截取导出当前画面'}
         </span>
       </div>
 
@@ -161,7 +219,7 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ imageUrl, onCapture, on
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-[#020204]/95 backdrop-blur-sm">
           <div className="flex flex-col items-center gap-4 p-8 bg-[#0a0a0c]/80 backdrop-blur-3xl border border-white/[0.06] rounded-[24px]">
             <Loader2 size={32} className="text-indigo-400 animate-spin" />
-            <span className="text-white/40 text-sm font-medium">加载全景图...</span>
+            <span className="text-white/40 text-sm font-medium">加载{is720 ? '720°球体' : ''}全景图...</span>
           </div>
         </div>
       )}
@@ -170,11 +228,15 @@ const PanoramaViewer: React.FC<PanoramaViewerProps> = ({ imageUrl, onCapture, on
       <div ref={canvasContainerRef} className="w-full h-full">
         <Canvas
           camera={{ position: [0, 0, 0.01], fov: 80, near: 0.1, far: 300 }}
-          gl={{ preserveDrawingBuffer: true, antialias: true, alpha: false }}
-          dpr={[1, Math.min(window.devicePixelRatio || 1, 2)]}
+          gl={{ preserveDrawingBuffer: true, antialias: true, alpha: false, powerPreference: 'high-performance' }}
+          dpr={[1, Math.min(window.devicePixelRatio || 1, 3)]}
         >
           <Suspense fallback={null}>
-            <PanoramaCylinder imageUrl={imageUrl} onReady={handleReady} />
+            {is720 ? (
+              <PanoramaSphere imageUrl={imageUrl} onReady={handleReady} />
+            ) : (
+              <PanoramaCylinder imageUrl={imageUrl} onReady={handleReady} />
+            )}
           </Suspense>
         </Canvas>
       </div>

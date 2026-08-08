@@ -2,8 +2,9 @@
 
 import React, { useRef, useState, useEffect, useCallback, useMemo, Suspense } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { OrbitControls, TransformControls } from '@react-three/drei';
+import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
+import { TransformControls as TransformControlsImpl } from 'three-stdlib';
 import { Loader2, Camera, X, Trash2, UserRound, User, Save, Check, Move3d, Rotate3d, ZoomIn } from 'lucide-react';
 
 const PRESET_COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#95a5a6', '#ecf0f1', '#2c3e50', '#e91e63', '#00bcd4'];
@@ -104,9 +105,10 @@ function Humanoid({ gender, color, pose }: { gender: string; color: string; pose
 function Cylinder360Bg({ imageUrl, onReady }: { imageUrl: string; onReady: () => void }) {
   const [geo, setGeo] = useState<THREE.CylinderGeometry | null>(null);
   const [tex, setTex] = useState<THREE.Texture | null>(null);
+  const { gl } = useThree();
   useEffect(() => {
     const img = new Image(); img.crossOrigin = 'anonymous';
-    img.onload = () => { const r = 60; const h = (2 * Math.PI * r) / (img.naturalWidth / img.naturalHeight); setGeo(new THREE.CylinderGeometry(r, r, h, 128, 1, true)); new THREE.TextureLoader().load(imageUrl, (t) => { t.colorSpace = THREE.SRGBColorSpace; t.wrapS = THREE.RepeatWrapping; t.repeat.x = -1; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter; t.generateMipmaps = true; setTex(t); onReady(); }, undefined, () => onReady()); };
+    img.onload = () => { const r = 60; const h = (2 * Math.PI * r) / (img.naturalWidth / img.naturalHeight); setGeo(new THREE.CylinderGeometry(r, r, h, 128, 1, true)); new THREE.TextureLoader().load(imageUrl, (t) => { t.colorSpace = THREE.SRGBColorSpace; t.wrapS = THREE.RepeatWrapping; t.repeat.x = -1; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter; t.generateMipmaps = true; t.anisotropy = gl.capabilities.getMaxAnisotropy?.() || 16; setTex(t); onReady(); }, undefined, () => onReady()); };
     img.onerror = () => onReady(); img.src = imageUrl;
   }, [imageUrl]);
   if (!geo) return null;
@@ -114,7 +116,8 @@ function Cylinder360Bg({ imageUrl, onReady }: { imageUrl: string; onReady: () =>
 }
 function Sphere720Bg({ imageUrl, onReady }: { imageUrl: string; onReady: () => void }) {
   const [tex, setTex] = useState<THREE.Texture | null>(null);
-  useEffect(() => { new THREE.TextureLoader().load(imageUrl, (t) => { t.colorSpace = THREE.SRGBColorSpace; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter; t.generateMipmaps = true; setTex(t); onReady(); }, undefined, () => onReady()); }, [imageUrl]);
+  const { gl } = useThree();
+  useEffect(() => { new THREE.TextureLoader().load(imageUrl, (t) => { t.colorSpace = THREE.SRGBColorSpace; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter; t.generateMipmaps = true; t.anisotropy = gl.capabilities.getMaxAnisotropy?.() || 16; setTex(t); onReady(); }, undefined, () => onReady()); }, [imageUrl]);
   if (!tex) return null; return <mesh><sphereGeometry args={[60, 128, 64]} /><meshBasicMaterial map={tex} side={THREE.BackSide} toneMapped={false} /></mesh>;
 }
 function FlatBg({ imageUrl, onReady }: { imageUrl: string; onReady: () => void }) {
@@ -125,21 +128,59 @@ function FlatBg({ imageUrl, onReady }: { imageUrl: string; onReady: () => void }
 }
 
 // ==========================================
+// ★ 人偶变换控件 — 绕过 drei，用原生 THREE.TransformControls
+// drei 版本的 dragging-changed 回调会干扰 OrbitControls.enabled 导致人偶只能拖一次
+// ==========================================
+function GizmoControls({ object, mode, onDragEnd }: { object: THREE.Object3D; mode: 'translate' | 'rotate' | 'scale'; onDragEnd: () => void }) {
+  const { camera, gl, scene, invalidate } = useThree();
+  const onDragEndRef = useRef(onDragEnd);
+  onDragEndRef.current = onDragEnd;
+
+  useEffect(() => {
+    const dom = gl.domElement;
+    const ctrl = new TransformControlsImpl(camera, dom);
+    ctrl.attach(object);
+    ctrl.setMode(mode);
+    ctrl.setSize(0.7);
+    ctrl.addEventListener('change' as any, () => invalidate());
+    ctrl.addEventListener('mouseUp' as any, () => onDragEndRef.current());
+    scene.add(ctrl);
+
+    return () => {
+      ctrl.detach();
+      scene.remove(ctrl);
+      ctrl.dispose();
+    };
+  }, [object, mode]);
+
+  return null;
+}
+
+// ==========================================
 // 3D 场景内容
 // ==========================================
 function SceneContent({
-  backgroundUrl, panoramaMode, characters, selectedCharId, onSelectChar, charRefsRef, onReady, fov, transformMode,
+  backgroundUrl, panoramaMode, characters, selectedCharId, onSelectChar, charRefsRef, onReady, fov, transformMode, onDragEnd,
 }: {
   backgroundUrl?: string; panoramaMode: PanoramaMode; characters: DirectorStageCharacter[];
   selectedCharId: string | null; onSelectChar: (id: string | null) => void;
   charRefsRef: React.MutableRefObject<Map<string, THREE.Group>>;
   onReady: () => void; fov: number; transformMode: 'translate' | 'rotate' | 'scale';
+  onDragEnd: () => void;
 }) {
   const setCharRef = useCallback((id: string, ref: THREE.Group | null) => { if (ref) charRefsRef.current.set(id, ref); else charRefsRef.current.delete(id); }, [charRefsRef]);
   const hasSelection = !!selectedCharId;
-  const selectedRef = selectedCharId ? charRefsRef.current.get(selectedCharId) : undefined;
   const isPanorama = panoramaMode === '360' || panoramaMode === '720';
   const isFlat = panoramaMode === 'flat';
+
+  // ★ 用 ref 缓存选中的 Group，只在 selectedCharId 变化时更新
+  // 防止 characters 状态更新导致 object 引用变化触发 GizmoControls 重建
+  const selectedRefRef = useRef<THREE.Group | null>(null);
+  const prevSelectedCharId = useRef<string | null>(null);
+  if (selectedCharId !== prevSelectedCharId.current) {
+    prevSelectedCharId.current = selectedCharId;
+    selectedRefRef.current = selectedCharId ? charRefsRef.current.get(selectedCharId) ?? null : null;
+  }
 
   return (<>
     {backgroundUrl && panoramaMode === '360' && <Cylinder360Bg imageUrl={backgroundUrl} onReady={onReady} />}
@@ -155,12 +196,12 @@ function SceneContent({
         <Humanoid gender={char.type} color={char.color} pose={char.pose} />
       </group>
     ))}
-    {selectedRef && <TransformControls object={selectedRef} mode={transformMode} size={0.7} />}
+    {selectedRefRef.current && <GizmoControls object={selectedRefRef.current} mode={transformMode} onDragEnd={onDragEnd} />}
     <CameraController fov={fov} />
     <OrbitControls enabled={!hasSelection} enablePan={!isPanorama} enableZoom={true} enableRotate={!isFlat}
       minDistance={1} maxDistance={isPanorama ? 15 : 30}
-      minPolarAngle={panoramaMode === '360' ? Math.PI * 0.25 : panoramaMode === '720' ? 0.05 : Math.PI * 0.2}
-      maxPolarAngle={panoramaMode === '360' ? Math.PI * 0.7 : panoramaMode === '720' ? Math.PI * 0.95 : Math.PI * 0.8}
+      minPolarAngle={panoramaMode === '360' ? Math.PI * 0.5 : panoramaMode === '720' ? 0.05 : Math.PI * 0.2}
+      maxPolarAngle={panoramaMode === '360' ? Math.PI * 0.5 : panoramaMode === '720' ? Math.PI * 0.95 : Math.PI * 0.8}
       rotateSpeed={0.5} zoomSpeed={1} target={[0, 0, 0]} />
   </>);
 }
@@ -211,15 +252,23 @@ const DirectorStageEditor: React.FC<DirectorStageEditorProps> = ({
   const handleRemoveChar = useCallback((id: string) => { updateChars(characters.filter(c => c.id !== id)); charRefsRef.current.delete(id); if (selectedCharId === id) setSelectedCharId(null); }, [characters, selectedCharId, updateChars]);
   const handleUpdateChar = useCallback((id: string, updates: Partial<DirectorStageCharacter>) => { updateChars(characters.map(c => c.id === id ? { ...c, ...updates } : c)); }, [characters, updateChars]);
 
-  // ★ 从 Group 读取变换并同步
+  // ★ 从 Group 读取变换并同步到 state（仅在拖拽结束后调用，不在拖拽过程中干扰 TransformControls）
   const syncTransforms = useCallback(() => {
     const refs = charRefsRef.current;
     if (refs.size === 0) return;
-    const updated = characters.map(c => { const g = refs.get(c.id); if (!g) return c; return { ...c, position: g.position.toArray() as [number, number, number], rotation: g.rotation.toArray() as [number, number, number], scale: g.scale.toArray() as [number, number, number] }; });
-    updateChars(updated);
-  }, [characters, updateChars]);
+    setCharacters(prev => {
+      const updated = prev.map(c => { const g = refs.get(c.id); if (!g) return c; return { ...c, position: g.position.toArray() as [number, number, number], rotation: g.rotation.toArray() as [number, number, number], scale: g.scale.toArray() as [number, number, number] }; });
+      onCharactersChange(updated);
+      return updated;
+    });
+  }, [onCharactersChange]);
 
-  const handleDeselect = useCallback(() => { syncTransforms(); setSelectedCharId(null); }, [syncTransforms]);
+  const handleDeselect = useCallback((e: React.MouseEvent) => {
+    // ★ 只在点击画布本身时取消选中（TransformControls 控件点击不触发）
+    if ((e.target as HTMLElement).tagName !== 'CANVAS') return;
+    syncTransforms();
+    setSelectedCharId(null);
+  }, [syncTransforms]);
 
   // ★ 关闭前先同步变换
   const handleClose = useCallback(() => { syncTransforms(); onClose(); }, [syncTransforms, onClose]);
@@ -253,9 +302,9 @@ const DirectorStageEditor: React.FC<DirectorStageEditorProps> = ({
 
       <div ref={canvasContainerRef} className="flex-1 relative" onClick={handleDeselect}>
         {loading && backgroundUrl && (<div className="absolute inset-0 z-40 flex items-center justify-center bg-[#020204]/95 backdrop-blur-sm"><div className="flex flex-col items-center gap-4 p-8 bg-[#0a0a0c]/80 backdrop-blur-3xl border border-white/[0.06] rounded-[24px]"><Loader2 size={32} className="text-violet-400 animate-spin" /><span className="text-white/40 text-sm font-medium">加载场景中...</span></div></div>)}
-        <Canvas camera={{ position: [0, 2, 8], fov: 75, near: 0.1, far: 300 }} gl={{ preserveDrawingBuffer: true, antialias: true, alpha: false }} dpr={[1, Math.min(window.devicePixelRatio || 1, 2)]}>
+        <Canvas camera={{ position: [0, 2, 8], fov: 75, near: 0.1, far: 300 }} gl={{ preserveDrawingBuffer: true, antialias: true, alpha: false, powerPreference: 'high-performance' }} dpr={[1, Math.min(window.devicePixelRatio || 1, 3)]}>
           <Suspense fallback={null}>
-            <SceneContent backgroundUrl={backgroundUrl} panoramaMode={panoramaMode} characters={characters} selectedCharId={selectedCharId} onSelectChar={(id) => setSelectedCharId(id)} charRefsRef={charRefsRef} onReady={handleReady} fov={fov} transformMode={transformMode} />
+            <SceneContent backgroundUrl={backgroundUrl} panoramaMode={panoramaMode} characters={characters} selectedCharId={selectedCharId} onSelectChar={(id) => setSelectedCharId(id)} charRefsRef={charRefsRef} onReady={handleReady} fov={fov} transformMode={transformMode} onDragEnd={syncTransforms} />
           </Suspense>
         </Canvas>
 
