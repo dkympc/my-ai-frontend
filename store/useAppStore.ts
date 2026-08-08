@@ -111,11 +111,8 @@ export const useAppStore = create<AppState>()(
     {
       name: 'yr-canvas-storage',
       storage: createJSONStorage(() => sessionStorage), // ★ 改用 sessionStorage：自动按浏览器会话隔离，杜绝跨账号数据污染
-      // ★ Bug A 修复：保留完整画布数据（含 nodes/edges），不再只存 id/title/updatedAt
-      // 旧逻辑将 canvasProjects 精简为基本信息，导致 sessionStorage 水合后 VideoCanvas 误以为已加载完成
-      // sessionStorage 随浏览器标签页自动销毁，容量充足（5-10MB），不会撑爆
+      // ★ 只持久化轻量 UI 状态到 sessionStorage，画布数据走 localStorage 备份
       partialize: (state) => ({
-        canvasProjects: state.canvasProjects || [],
         activeView: state.activeView,
         activeCanvasProjectId: state.activeCanvasProjectId,
         isFilmControlOpen: state.isFilmControlOpen,

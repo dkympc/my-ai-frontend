@@ -72,3 +72,37 @@ export interface CanvasProject {
   edges?: any[];
   localAssets?: any[]; // ✨ 新增：当前画布专属的拖拽资产库
 }
+
+// ★★★ 导演台节点数据类型 — 3D场景编辑器 + 人偶 + 机位
+export interface DirectorStageCharacter {
+  id: string;
+  type: 'male' | 'female';
+  position: [number, number, number]; // 3D世界坐标
+  rotation: [number, number, number]; // 欧拉旋转
+  scale: [number, number, number];    // 缩放
+  color: string;                       // 人偶颜色 hex
+  pose: 'stand' | 'walk' | 'sit';     // 姿势预设
+}
+
+export interface DirectorStageCameraPreset {
+  id: string;
+  name: string;
+  position: [number, number, number];
+  target: [number, number, number];
+  fov: number;
+}
+
+export interface DirectorStageNodeData {
+  type: 'directorStage';
+  // 场景背景
+  backgroundUrl?: string;
+  panoramaMode: '360' | '720' | 'flat';  // 360圆柱体 / 720球体(预留) / 平面
+  // 人偶列表
+  characters: DirectorStageCharacter[];
+  // 机位预设
+  cameraPresets: DirectorStageCameraPreset[];
+  activePresetId?: string;
+  // 提示词
+  prompt?: string;
+  status?: 'draft' | 'ready';
+}

@@ -24,7 +24,7 @@ import {
 import '@xyflow/react/dist/style.css'; 
 
 // 🚀 唯一引用的 lucide-react，完美避开所有重名报错
-import { ArrowLeft, Plus, Type, Image as ImageIconIcon, Film, ZoomIn, ZoomOut, Maximize, Clapperboard, Layers, Check, Settings, X, Loader2, Sliders, ChevronDown, MessageSquare } from 'lucide-react';
+import { ArrowLeft, Plus, Type, Image as ImageIconIcon, Film, ZoomIn, ZoomOut, Maximize, Clapperboard, Layers, Check, Settings, X, Loader2, Sliders, ChevronDown, MessageSquare, Globe } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { GENRE_PRESETS, TEMPO_PROFILES } from '@/lib/director-rules';
 import { MODELS } from '@/lib/constants';
@@ -41,7 +41,8 @@ interface WorkspaceProps {
 }
   
 import { MediaNode, TextNode, RenderNode, CombineNode, MasterScriptNode, ShotNode, VideoClipNode, ScriptTableNode, AssetTableNode, PanoramaNode } from './CustomNodes';
-const nodeTypes = { media: MediaNode, text: TextNode, render: RenderNode, combine: CombineNode, masterScript: MasterScriptNode, shot: ShotNode, videoClip: VideoClipNode, scriptTable: ScriptTableNode, assetTable: AssetTableNode, panorama: PanoramaNode };
+import { DirectorStageNode } from './DirectorStageNode';
+const nodeTypes = { media: MediaNode, text: TextNode, render: RenderNode, combine: CombineNode, masterScript: MasterScriptNode, shot: ShotNode, videoClip: VideoClipNode, scriptTable: ScriptTableNode, assetTable: AssetTableNode, panorama: PanoramaNode, directorStage: DirectorStageNode };
 
 // ✨ 自定义可悬停删除的连线组件
 function DeletableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, markerEnd }: any) {
@@ -617,16 +618,38 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
     if (!menuPos) return;
     const position = screenToFlowPosition({ x: menuPos.screenX, y: menuPos.screenY });
     const nodeId = `node_${Date.now()}`;
+
+    // 根据节点类型构建不同的默认 data
+    let defaultData: any;
+    if (type === 'text') {
+      defaultData = { text: '', model: 'gemini-3.1-pro-preview' };
+    } else if (type === 'directorStage') {
+      defaultData = {
+        backgroundUrl: '',
+        panoramaMode: '360',
+        characters: [],
+        cameraPresets: [],
+        prompt: '',
+        status: 'draft',
+      };
+    } else if (type === 'panorama') {
+      defaultData = {
+        asset: null,
+        ratio: '21:9',
+        prompt: '',
+        model: canvasSettings?.defaultImageModel || 'gpt-image-2',
+      };
+    } else {
+      defaultData = {
+        asset: null, ratio: '16:9',
+        prompt: canvasSettings?.globalPromptSuffix ? canvasSettings.globalPromptSuffix : '',
+        model: type === 'media' ? (canvasSettings?.defaultImageModel || 'gpt-image-2') : (canvasSettings?.defaultVideoModel || 'doubao-seedance-2-0')
+      };
+    }
+
     const newNode = {
       id: nodeId, type, position,
-      // ✨ 接入全局设定：新建空节点也继承默认模型
-      data: type === 'text' 
-        ? { text: '', model: 'gemini-3.1-pro-preview' } 
-        : { 
-            asset: null, ratio: '16:9', 
-            prompt: canvasSettings?.globalPromptSuffix ? canvasSettings.globalPromptSuffix : '', 
-            model: type === 'media' ? (canvasSettings?.defaultImageModel || 'gpt-image-2') : (canvasSettings?.defaultVideoModel || 'doubao-seedance-2-0')
-          }, 
+      data: defaultData,
     };
     setNodes((nds) => [...nds, newNode]);
 
@@ -1089,11 +1112,8 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
         <ZoomPanel />
       </ReactFlow>
 
-      {/* 左上角：返回舱 + 原位极简编辑框 + 保存指示灯 */}
+      {/* 左上角：原位极简编辑框 + 保存指示灯（返回按钮已上移至 WorkspaceApp 层级，确保加载时始终可见） */}
       <div className="absolute top-6 left-6 z-50 flex items-center gap-3">
-        <button onClick={() => setActiveCanvasProjectId(null)} className="w-10 h-10 rounded-full bg-black/60 backdrop-blur-3xl border border-white/[0.08] flex items-center justify-center text-zinc-400 hover:text-white hover:bg-white/10 transition-all shadow-[0_10px_30px_rgba(0,0,0,0.8)] hover:scale-105">
-          <ArrowLeft size={18} />
-        </button>
         
         {/* ✨ 新增：中控台一键开关 Pill 按钮 */}
         <button 
@@ -1377,7 +1397,15 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
             
             <button onClick={() => onAddNode('combine')} className="flex items-center gap-3 px-3 py-2.5 rounded-[16px] text-[13px] font-medium text-zinc-300 hover:text-white hover:bg-white/[0.06] transition-colors w-full text-left group">
                <div className="w-7 h-7 rounded-[10px] bg-[#050505] relative overflow-hidden border border-white/[0.08] shadow-[inset_0_1px_1px_rgba(255,255,255,0.1),0_2px_8px_rgba(0,0,0,0.5)] flex items-center justify-center group-hover:border-white/[0.2] transition-all"><Layers size={12} className="text-zinc-200" /></div>
-              合成节点
+               合成节点
+            </button>
+            <button onClick={() => onAddNode('panorama')} className="flex items-center gap-3 px-3 py-2.5 rounded-[16px] text-[13px] font-medium text-zinc-300 hover:text-white hover:bg-white/[0.06] transition-colors w-full text-left group">
+               <div className="w-7 h-7 rounded-[10px] bg-[#050505] relative overflow-hidden border border-white/[0.08] shadow-[inset_0_1px_1px_rgba(255,255,255,0.1),0_2px_8px_rgba(0,0,0,0.5)] flex items-center justify-center group-hover:border-white/[0.2] transition-all"><Globe size={12} className="text-emerald-300" /></div>
+               全景图节点
+            </button>
+            <button onClick={() => onAddNode('directorStage')} className="flex items-center gap-3 px-3 py-2.5 rounded-[16px] text-[13px] font-medium text-zinc-300 hover:text-white hover:bg-white/[0.06] transition-colors w-full text-left group">
+               <div className="w-7 h-7 rounded-[10px] bg-[#050505] relative overflow-hidden border border-white/[0.08] shadow-[inset_0_1px_1px_rgba(255,255,255,0.1),0_2px_8px_rgba(0,0,0,0.5)] flex items-center justify-center group-hover:border-white/[0.2] transition-all"><Clapperboard size={12} className="text-violet-300" /></div>
+               导演台
             </button>
            </div>
         </div>

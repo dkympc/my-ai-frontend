@@ -657,6 +657,16 @@ export default function WorkspaceApp() {
           {activeView === 'video-gen' && <VideoGenerator videoHistory={videoHistory} setVideoHistory={setVideoHistory} />}
           {activeView === 'video-canvas' && !activeCanvasProjectId && hasCanvasLoaded && <CanvasVault />}
           {activeView === 'video-canvas' && activeCanvasProjectId && hasCanvasLoaded && <VideoCanvas imageHistory={imageHistory} videoHistory={videoHistory} />}
+
+          {/* ★ 画布左上角常驻返回按钮 — 无论加载状态如何都可见，卡住时可以点击返回重新进入 */}
+          {activeView === 'video-canvas' && activeCanvasProjectId && (
+            <button
+              onClick={() => useAppStore.getState().setActiveCanvasProjectId(null)}
+              className="absolute top-6 left-6 z-[9999] w-10 h-10 rounded-full bg-black/60 backdrop-blur-3xl border border-white/[0.08] flex items-center justify-center text-zinc-400 hover:text-white hover:bg-white/10 transition-all shadow-[0_10px_30px_rgba(0,0,0,0.8)] hover:scale-105"
+            >
+              <ArrowLeft size={18} />
+            </button>
+          )}
           {activeView === 'agent-customer-service' && <AgentCustomerService />}
         </main>
       </div>
