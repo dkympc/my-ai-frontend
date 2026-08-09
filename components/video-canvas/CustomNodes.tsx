@@ -227,6 +227,72 @@ const parseDurationFromLastTS = (segments: any[]): number => {
   return pointMatch ? parseInt(pointMatch[1], 10) : 5;
 };
 
+// ★ 字符级扫描：修复 LLM 在 JSON 字符串值中输出的中文对话引号（U+0022 代替 U+201C/U+201D）
+// 逐字符追踪 JSON 字符串内外状态，遇到字符串内部的 " 且处于对话上下文时自动转义为 \"
+// 7 种对话引号上下文：中文4种 + 英文3种（剧本中混有英文台词如 LINDA: "Relax. Feed her..."）
+// 4 种对话引号上下文：① 夹在中文中间 ② 关引号+JSON分隔符 ③ JSON值开头+开引号 ④ 关引号+破折号
+const escapeChineseDialogueQuotes = (jsonStr: string): string => {
+  let result = '';
+  let inString = false;
+  let escapeNext = false;
+
+  const isCJK = (c: string) => /[\u4e00-\u9fff\u3400-\u4dbf\u3000-\u303f\uff00-\uffef\u2014\u2026。，！？；：、—…]/.test(c);
+  const isDash = (c: string) => /[\u2014\u2026—…]/.test(c);
+
+  for (let i = 0; i < jsonStr.length; i++) {
+    const ch = jsonStr[i];
+
+    if (escapeNext) { result += ch; escapeNext = false; continue; }
+    if (ch === '\\') { result += ch; escapeNext = true; continue; }
+
+    if (ch === '"') {
+      if (!inString) {
+        inString = true;
+        result += ch;
+      } else {
+        const remaining = jsonStr.slice(i + 1);
+        const afterTrimmed = remaining.trimStart();
+
+        // 优先：后面是 JSON 结构字符 → 合法结束符
+        if (afterTrimmed.startsWith(',') || afterTrimmed.startsWith('}') || afterTrimmed.startsWith(']') || afterTrimmed.startsWith(':')) {
+          inString = false;
+          result += ch;
+          continue;
+        }
+
+        const prevChar = result.length > 0 ? result[result.length - 1] : '';
+        const nextChar = remaining[0] || '';
+        const prevIsCJK = isCJK(prevChar);
+        const nextIsCJK = isCJK(nextChar);
+        const prevIsQuote = prevChar === '"';
+        const nextIsQuote = nextChar === '"';
+        const nextIsDash = isDash(nextChar);
+        const nextIsLetter = /[a-zA-Z]/.test(nextChar);
+        const prevIsLetterOrPunct = /[a-zA-Z.,!?;:]/.test(prevChar);
+
+        // 7 种对话引号上下文（覆盖中文 + 英文台词）
+        if (prevIsCJK && nextIsCJK)          { result += '\\"'; continue; }  // ① 夹在中文中间
+        if (prevIsCJK && nextIsQuote)        { result += '\\"'; continue; }  // ② 关引号 + JSON分隔符
+        if (prevIsQuote && nextIsCJK)        { result += '\\"'; continue; }  // ③ JSON值开头 + 开引号
+        if (prevIsCJK && nextIsDash)         { result += '\\"'; continue; }  // ④ 关引号 + 破折号
+        if (prevIsCJK && nextIsLetter)       { result += '\\"'; continue; }  // ⑤ CJK + " + 英文 → 英文对话开引号
+        if (prevIsLetterOrPunct && nextIsCJK){ result += '\\"'; continue; }  // ⑥ 英文/标点 + " + CJK → 英文对话关引号
+        if (prevIsLetterOrPunct && nextIsQuote){ result += '\\"'; continue; }// ⑦ 英文/标点 + "" → 英文关引号+JSON分隔符
+
+        // 不匹配任何对话引号上下文 → 当 JSON 结束符
+        inString = false;
+        result += ch;
+      }
+    } else {
+      result += ch;
+    }
+  }
+
+  return result;
+};
+
+
+
 // ★ 辅助：合并多个 AbortSignal
 const combineAbortSignals = (...signals: AbortSignal[]): AbortSignal => {
   const controller = new AbortController();
@@ -933,46 +999,39 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
         prompt_type: "fission-stage1",
         params: {
           NEXT_SHOT_START: nextShotStart,
-          DIRECTOR_CONTEXT: directorCtx?.llmContextBlock || ''
+          DIRECTOR_CONTEXT: '' // ★ 暂时移除导演仓库参数，纯净测试分镜裂变
         },
         user_content: (() => {
           const fullText = data.text || '';
           const targetText = realSelectedText || fullText;
-          const isFullScript = !realSelectedText || realSelectedText.trim() === fullText.trim();
-          
-          let scriptContext = '';
-          if (!isFullScript) {
-            const selStart = realSelStart;
-            const selEnd = realSelEnd;
-            if (fullText.length > 10000 && data.scriptSummary) {
-              scriptContext = `全剧本故事大纲：${data.scriptSummary}`;
-            } else {
-              const beforeText = selStart > 0 ? fullText.substring(Math.max(0, selStart - 1500), selStart) : '';
-              const afterText = selEnd < fullText.length ? fullText.substring(selEnd, Math.min(selEnd + 1500, fullText.length)) : '';
-              if (beforeText) scriptContext += `前情：${beforeText}`;
-              if (afterText) scriptContext += `\n后续：${afterText}`;
-            }
-          }
 
-          // ★ 组装参考上下文（仅供理解，严禁拆分）
-          let referenceParts: string[] = [];
-          if (scriptContext) referenceParts.push(scriptContext);
-          if (existingShotsSummary) referenceParts.push(`画布已有分镜索引：${existingShotsSummary}`);
-          if (dictText) referenceParts.push(dictText);
-          if (data.globalCamera) referenceParts.push(`全局摄影参数：${data.globalCamera}`);
+          // ★ 组装辅助参考（画布已有分镜、资产字典、摄影参数）
+          let auxParts: string[] = [];
+          if (existingShotsSummary) auxParts.push(`画布已有分镜索引：${existingShotsSummary}`);
+          if (dictText) auxParts.push(dictText);
+          if (data.globalCamera) auxParts.push(`全局摄影参数：${data.globalCamera}`);
 
           let promptBody = '';
-          if (referenceParts.length > 0) {
-            promptBody += '═══════════════════════════════════════\n';
-            promptBody += '⚠️ 以下为「参考上下文」，仅供理解剧情脉络，严禁拆分为分镜！\n';
-            promptBody += '═══════════════════════════════════════\n';
-            promptBody += referenceParts.join('\n\n');
-            promptBody += '\n═══════════════════════════════════════\n\n';
-          }
-          promptBody += '⚠️ 以下为「目标文本」，仅拆分此部分：\n';
+
+          // ★ 块①：目标选段（最前面——LLM 顺序处理，先看到先拆分）
+          promptBody += '═══════════════════════════════════════\n';
+          promptBody += '★★★ 以下为本次需要拆分的目标文本 ★★★\n';
           promptBody += '═══════════════════════════════════════\n';
           promptBody += targetText;
-          promptBody += '\n═══════════════════════════════════════';
+          promptBody += '\n═══════════════════════════════════════\n\n';
+
+          // ★ 块②：完整剧本附录（放最后——LLM 拆分完目标文本后才看到，仅作背景参考）
+          promptBody += '---\n';
+          promptBody += '📎 附录：完整剧本（仅供理解故事背景，目标文本已在上方拆分完毕，附录内容无需再次处理）\n';
+          promptBody += '---\n';
+          promptBody += fullText;
+          promptBody += '\n---\n\n';
+
+          // ★ 块③：辅助参考
+          if (auxParts.length > 0) {
+            promptBody += '【辅助参考】\n';
+            promptBody += auxParts.join('\n\n');
+          }
 
           return promptBody;
         })()
@@ -1028,22 +1087,30 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
         tail: cleanJson1.slice(-500)
       });
       
+      // ★ 字符级扫描：修复 LLM 在 JSON 字符串值中输出的中文对话引号
+      // 逐字符追踪 JSON 字符串内外状态，4 种对话引号上下文自动转义
+      cleanJson1 = escapeChineseDialogueQuotes(cleanJson1);
+      
       // ★ JSON 修复兜底：LLM 偶尔输出畸形 JSON（尾逗号/未转义引号/注释等），先尝试直接解析，失败则逐层修复
       let json1: any;
       try {
           json1 = JSON.parse(cleanJson1.trim());
-      } catch {
+      } catch (e1: any) {
+          console.warn('[JSON Repair L0] 直接解析失败:', e1.message?.slice(0, 100), '| 出错位置附近:', cleanJson1.slice(Math.max(0, (e1.message?.match(/position (\d+)/)?.[1] || 100) - 80), (e1.message?.match(/position (\d+)/)?.[1] || 100) + 80));
           // 修复 1：移除尾逗号
           let fixed = cleanJson1.replace(/,\s*([}\]])/g, '$1');
-          try { json1 = JSON.parse(fixed.trim()); } catch {
+          try { json1 = JSON.parse(fixed.trim()); } catch (e2: any) {
+              console.warn('[JSON Repair L1] 去尾逗号后仍失败:', e2.message?.slice(0, 100), '| 出错位置附近:', fixed.slice(Math.max(0, (e2.message?.match(/position (\d+)/)?.[1] || 100) - 80), (e2.message?.match(/position (\d+)/)?.[1] || 100) + 80));
               // 修复 2：移除 JS 注释
               fixed = fixed.replace(/\/\/[^\n]*\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '');
-              try { json1 = JSON.parse(fixed.trim()); } catch {
+              try { json1 = JSON.parse(fixed.trim()); } catch (e3: any) {
+                  console.warn('[JSON Repair L2] 去注释后仍失败:', e3.message?.slice(0, 100), '| 出错位置附近:', fixed.slice(Math.max(0, (e3.message?.match(/position (\d+)/)?.[1] || 100) - 80), (e3.message?.match(/position (\d+)/)?.[1] || 100) + 80));
                   // 修复 3：尝试用正则提取 shots 数组
                   const shotsMatch = cleanJson1.match(/"shots"\s*:\s*(\[[\s\S]*\])/);
                   if (shotsMatch) {
                       fixed = '{ "shots": ' + shotsMatch[1] + ' }';
-                      try { json1 = JSON.parse(fixed.trim()); } catch {
+                      try { json1 = JSON.parse(fixed.trim()); } catch (e4: any) {
+                          console.warn('[JSON Repair L3] 正则提取后仍失败:', e4.message?.slice(0, 100), '| 出错位置附近:', fixed.slice(Math.max(0, (e4.message?.match(/position (\d+)/)?.[1] || 100) - 80), (e4.message?.match(/position (\d+)/)?.[1] || 100) + 80));
                           // 修复 4：逐个提取 shot 对象（按 "shotNumber" 分界，容错对话中的未转义引号）
                           try {
                               const shotObjects: any[] = [];
