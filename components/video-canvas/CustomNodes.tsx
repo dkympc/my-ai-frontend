@@ -999,7 +999,7 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
         prompt_type: "fission-stage1",
         params: {
           NEXT_SHOT_START: nextShotStart,
-          DIRECTOR_CONTEXT: '' // ★ 暂时移除导演仓库参数，纯净测试分镜裂变
+          DIRECTOR_CONTEXT: directorCtx?.llmContextBlock || ''
         },
         user_content: (() => {
           const fullText = data.text || '';
