@@ -279,9 +279,9 @@ const escapeChineseDialogueQuotes = (jsonStr: string): string => {
         if (prevIsLetterOrPunct && nextIsCJK){ result += '\\"'; continue; }  // ⑥ 英文/标点 + " + CJK → 英文对话关引号
         if (prevIsLetterOrPunct && nextIsQuote){ result += '\\"'; continue; }// ⑦ 英文/标点 + "" → 英文关引号+JSON分隔符
 
-        // 不匹配任何对话引号上下文 → 当 JSON 结束符
-        inString = false;
-        result += ch;
+        // ★ 不匹配任何对话引号上下文 → 保守按对话引号转义
+        // 宁可多转义导致 JSON.parse 报错（修复链 L1-L4 兜底），也绝不能当 JSON 结束符截断内容（静默丢分镜）
+        result += '\\"';
       }
     } else {
       result += ch;
