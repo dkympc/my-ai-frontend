@@ -89,3 +89,123 @@
   margin-bottom: 0.75rem;
   line-height: 1.6;
 }
+
+/* ═══════════════════════════════════════════════════
+   画布气质改造 — 语义化设计系统
+   ═══════════════════════════════════════════════════ */
+
+@layer components {
+
+  /* ── 基础玻璃面板：侧边栏 / 卡片 / Toast ── */
+  .glass-panel {
+    @apply bg-black/30 backdrop-blur-3xl
+           border border-white/[0.06]
+           shadow-[0_8px_32px_rgba(0,0,0,0.7),inset_0_1px_0_rgba(255,255,255,0.04)];
+  }
+
+  /* ── 深色玻璃面板：抽屉 / 弹窗 ── */
+  .glass-panel-deep {
+    @apply bg-[#050507]/85 backdrop-blur-3xl
+           border border-white/[0.06]
+           shadow-[0_30px_100px_rgba(0,0,0,0.95),inset_0_1px_1px_rgba(255,255,255,0.06)];
+  }
+
+  /* ── 节点卡片：微渐变背景增加立体感 ── */
+  .glass-card {
+    @apply relative rounded-[24px] backdrop-blur-3xl
+           border border-white/[0.06]
+           shadow-[0_8px_32px_rgba(0,0,0,0.7),inset_0_1px_0_rgba(255,255,255,0.04)]
+           transition-all duration-300;
+    background: linear-gradient(180deg, rgba(30,30,36,0.65) 0%, rgba(18,18,22,0.65) 100%);
+  }
+
+  /* ── 节点 Hover 态 ── */
+  .glass-card-hover {
+    @apply hover:border-white/[0.15];
+  }
+
+  /* ── 节点选中态：仅边框微光，背景不变色 ── */
+  .glass-card-selected {
+    @apply border-white/[0.25]
+           shadow-[0_0_30px_rgba(255,255,255,0.06),0_0_60px_rgba(255,255,255,0.03),0_10px_40px_rgba(0,0,0,0.8)];
+  }
+
+  /* ── MasterScriptNode 专属：中性暗灰渐变，去蓝调 ── */
+  .glass-card-master {
+    background: linear-gradient(180deg, rgba(26,26,29,0.7) 0%, rgba(16,16,19,0.7) 100%);
+  }
+
+  /* ── 分镜方法卡片 ── */
+  .method-card {
+    @apply relative rounded-[14px] border border-white/[0.06] p-4
+           transition-all duration-200 cursor-pointer;
+    background: linear-gradient(180deg, rgba(24,24,27,0.5) 0%, rgba(18,18,21,0.5) 100%);
+  }
+  .method-card:hover {
+    @apply border-white/[0.12];
+    background: linear-gradient(180deg, rgba(28,28,32,0.6) 0%, rgba(22,22,25,0.6) 100%);
+  }
+  .method-card-active {
+    @apply border-white/[0.15];
+    background: linear-gradient(180deg, rgba(34,34,39,0.65) 0%, rgba(26,26,30,0.65) 100%);
+    box-shadow: 0 0 20px rgba(255,255,255,0.03), 0 4px 16px rgba(0,0,0,0.4);
+  }
+  .method-card-disabled {
+    @apply opacity-40 cursor-not-allowed;
+  }
+
+  /* ── 对话面板消息气泡 ── */
+  .dialogue-bubble-ai {
+    @apply rounded-2xl rounded-tl-sm px-4 py-3 text-[13px] leading-relaxed;
+    background: rgba(20,20,24,0.7);
+    border: 1px solid rgba(255,255,255,0.06);
+    color: #d4d4d8;
+  }
+  .dialogue-bubble-user {
+    @apply rounded-2xl rounded-tr-sm px-4 py-3 text-[13px] leading-relaxed;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.08);
+    color: #e4e4e7;
+  }
+}
+
+/* ═══════════════════════════════════════════════════
+   画布气质改造 — 动画关键帧
+   ═══════════════════════════════════════════════════ */
+
+/* ── 连线光流：虚线沿路径流动 ── */
+@keyframes edge-flow {
+  0% { stroke-dashoffset: 20; }
+  100% { stroke-dashoffset: 0; }
+}
+
+.edge-flow-animated {
+  animation: edge-flow 0.8s linear infinite;
+}
+
+/* ═══════════════════════════════════════════════════
+   画布气质改造 — 深空背景（纯黑 + 噪点质感 + 暗角）
+   ═══════════════════════════════════════════════════ */
+
+.canvas-cinematic-bg {
+  background-color: #060609;
+  position: relative;
+}
+
+.canvas-cinematic-bg::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+  mask-image: radial-gradient(ellipse 70% 70% at 50% 50%, black 40%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 70% 70% at 50% 50%, black 40%, transparent 100%);
+}
+
+/* 覆盖 React Flow 自带的选中节点 box-shadow */
+.react-flow__node.selected {
+  box-shadow: none !important;
+}

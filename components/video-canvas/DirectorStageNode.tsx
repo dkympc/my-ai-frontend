@@ -12,9 +12,8 @@ const DirectorStageEditor = dynamic(() => import('./DirectorStageEditor'), { ssr
 
 type PanoramaMode = '360' | '720' | 'flat';
 
-const nodeBaseClass = "relative rounded-[24px] bg-[#18181b]/80 backdrop-blur-3xl shadow-[0_10px_40px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.05)] transition-all duration-300";
-const selectedBorderClass = "border border-white/30 shadow-[0_0_40px_rgba(255,255,255,0.05),0_10px_40px_rgba(0,0,0,0.8)]";
-const unselectedBorderClass = "border border-white/[0.08] hover:border-white/20";
+const nodeBaseClass = "glass-card glass-card-hover";
+const selectedBorderClass = "glass-card-selected";
 const handleBase = "!w-[24px] !h-[24px] !bg-transparent !border-none !rounded-full opacity-0 group-hover:opacity-100 z-50 flex items-center justify-center relative before:absolute before:content-[''] before:w-[12px] before:h-[12px] before:bg-white before:rounded-full before:border-[3px] before:border-[#18181b] before:shadow-[0_0_15px_rgba(255,255,255,0.9)] before:transition-all hover:before:scale-125 transition-opacity duration-300";
 const handleLeft = `${handleBase} !-left-[12px]`;
 const handleRight = `${handleBase} !-right-[12px]`;
@@ -108,7 +107,7 @@ const _DirectorStageNode = ({ id, data, selected }: DirectorStageNodeProps) => {
       <Handle type="target" position={Position.Left} id="left" className={handleLeft} />
       <Handle type="source" position={Position.Right} id="right" className={handleRight} />
 
-      <div style={{ width: '340px' }} className={`${nodeBaseClass} ${selected ? selectedBorderClass : unselectedBorderClass} flex flex-col p-4`}>
+      <div style={{ width: '340px' }} className={`${nodeBaseClass} ${selected ? selectedBorderClass : ''} flex flex-col p-4`}>
         <div className="flex items-center gap-2 mb-3 pb-2 border-b border-white/[0.06]">
           <Clapperboard size={14} className="text-zinc-400" />
           <span className="text-[11px] font-bold text-white tracking-widest uppercase">导演台</span>

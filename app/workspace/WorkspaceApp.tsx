@@ -548,7 +548,7 @@ export default function WorkspaceApp() {
 
   // ==================== 认证后的 SPA UI（原 page.tsx 第 1285 行起） ====================
   return (
-    <div className="flex h-screen bg-[#020203] text-zinc-200 antialiased font-sans overflow-hidden relative selection:bg-white/20">
+    <div className="flex h-screen canvas-cinematic-bg text-zinc-200 antialiased font-sans overflow-hidden relative selection:bg-white/20">
       
       {/* CSS 全局魔法 */}
       <style jsx global>{`
@@ -616,11 +616,11 @@ export default function WorkspaceApp() {
         <div className="absolute top-[30%] left-[50%] -translate-x-1/2 w-[60vw] h-[30vh] rounded-full bg-purple-900/5 blur-[150px] pointer-events-none"></div>
       </div>
 
-      {/* Toast */}
+      {/* Toast — 纯文字黑色液态玻璃风格，无彩色图标 */}
       {toastMsg && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 bg-[#1a1a1e]/80 backdrop-blur-2xl border border-white/10 px-6 py-2.5 rounded-full shadow-2xl flex items-center gap-3 animate-in slide-in-from-top-4 fade-in z-[100001]">
-          <AlertTriangle size={15} className="text-indigo-400" />
-          <span className="text-xs font-medium text-white">{toastMsg}</span>
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 glass-panel px-6 py-2.5 rounded-full flex items-center gap-2.5 animate-in slide-in-from-top-4 fade-in z-[100001]">
+          <span className="w-1.5 h-1.5 rounded-full bg-white/40 shrink-0" />
+          <span className="text-xs font-medium text-zinc-200">{toastMsg}</span>
         </div>
       )}
       

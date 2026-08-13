@@ -1,10 +1,11 @@
 ﻿import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom'; // ✨ 新增：用于渲染悬浮顶层的禅定舱
 import { Handle, Position, useReactFlow, NodeResizeControl, useEdges, useNodes } from '@xyflow/react';
+import type { NodeProps } from '@xyflow/react';
 import { 
   Image as ImageIcon, Film, Type, Sparkles, ChevronDown, MoveUp, Scaling, Loader2, Layers, CheckCircle,
   Maximize, Wand2, Grid, UserRound, PenTool, Eraser, RefreshCcw, Download, Subtitles, Scissors, AudioWaveform, RotateCcw,
-  Upload, Trash2, Play, ArrowRight, ArrowDown, Settings2, CheckSquare, Clapperboard, X, Table, Plus, Expand, Database, Map, Users, Package, MoreHorizontal, Copy, Globe
+  Upload, Trash2, Play, ArrowRight, ArrowDown, Settings2, CheckSquare, Clapperboard, X, Table, Plus, Expand, Database, Map, Users, Package, MoreHorizontal, Copy, Globe, Camera, MessageSquare, Send, List
 } from 'lucide-react';
 import { fetchApi } from '@/services/api';
 import { DirectorRouter } from '@/lib/director-rules';
@@ -371,11 +372,13 @@ const getImageQualityOptions = (model: string) => {
 
 // ==========================================
 // ==========================================
-// 极简碳灰卡片基底 & 悬浮发光小白点
+// 画布气质改造 — 语义化液态玻璃设计系统
+// 旧 nodeBaseClass 已替换为 globals.css 中的 .glass-card
+// selectedBorderClass 已替换为 .glass-card-selected（带呼吸光动画）
+// unselectedBorderClass 已内置在 .glass-card 中（border + hover 态）
 // ==========================================
-const nodeBaseClass = "relative rounded-[24px] bg-[#18181b]/80 backdrop-blur-3xl shadow-[0_10px_40px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.05)] transition-all duration-300";
-const selectedBorderClass = "border border-white/30 shadow-[0_0_40px_rgba(255,255,255,0.05),0_10px_40px_rgba(0,0,0,0.8)]";
-const unselectedBorderClass = "border border-white/[0.08] hover:border-white/20";
+const nodeBaseClass = "glass-card glass-card-hover";
+const selectedBorderClass = "glass-card-selected";
 // ✨ 只保留左右接口，彻底抛弃上下接口
 const handleBase = "!w-[24px] !h-[24px] !bg-transparent !border-none !rounded-full opacity-0 group-hover:opacity-100 z-50 flex items-center justify-center relative before:absolute before:content-[''] before:w-[12px] before:h-[12px] before:bg-white before:rounded-full before:border-[3px] before:border-[#18181b] before:shadow-[0_0_15px_rgba(255,255,255,0.9)] before:transition-all hover:before:scale-125 transition-opacity duration-300";
 const handleLeft = `${handleBase} !-left-[12px]`;
@@ -524,14 +527,106 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
   const fissionMethod = useAppStore(s => s.canvasSettings?.fissionMethod || 'general');
   const setCanvasSettings = useAppStore(s => s.setCanvasSettings);
 
-  const [showBookmarks, setShowBookmarks] = useState(false);
   const [extractingAsset, setExtractingAsset] = useState<string | null>(null); // ✨ 新增：控制资产表格提取状态
   const [showAssetMenu, setShowAssetMenu] = useState(false); // ✨ 新增：控制提取菜单
   const [showEpisodeSelect, setShowEpisodeSelect] = useState(false); // ★ 集数选择弹窗开关
   const [episodeSelectMode, setEpisodeSelectMode] = useState<'asset' | 'fission'>('asset'); // ★ 弹窗模式：资产提取 or 分镜选区
   const [episodeSelectAssetType, setEpisodeSelectAssetType] = useState<'scene' | 'character' | 'prop'>('scene'); // ★ 资产表提取类型
   const [cachedEpisodesForModal, setCachedEpisodesForModal] = useState<any[] | null>(null); // ★ 缓存命中时传给弹窗
+  const [dialogueOpen, setDialogueOpen] = useState(false); // ★ 分镜对话面板展开/收起
+  const [dialogueMessages, setDialogueMessages] = useState<{role: string; content: string}[]>([]); // ★ 对话消息列表
+  const [dialogueLoading, setDialogueLoading] = useState(false); // ★ 对话LLM请求中
+  const [dialogueInput, setDialogueInput] = useState(''); // ★ 对话输入框
+  const [previewReady, setPreviewReady] = useState(false); // ★ 首条AI回复完成后，允许用户点击确认生成
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // ★ 发送分镜预览请求到 LLM（走 /v1/canvas/prompt，prompt_type=fission-preview）
+  //    reset=true 时忽略旧消息，从零开始（用于重新打开预览）
+  const sendPreviewToLLM = async (userMessage?: string, reset?: boolean) => {
+    // ★ 从 textarea ref 实时读取选中文本，避免 React state 延迟导致字数不准
+    const ta = textareaRef.current;
+    const realSelectedText = ta ? ta.value.substring(ta.selectionStart, ta.selectionEnd) : selectedText;
+    if (!realSelectedText && !userMessage) return;
+    setDialogueLoading(true);
+    setPreviewReady(false);
+
+    const targetModel = resolveLLMModel(data);
+
+    const baseMessages = reset ? [] : dialogueMessages;
+    const displayUserMsg = userMessage || '请分析我框选的剧本段落，给出分镜预览';
+    const newMessages = [...baseMessages, { role: 'user', content: displayUserMsg }];
+    setDialogueMessages(newMessages);
+
+    let userContent = '';
+    if (baseMessages.length === 0) {
+      userContent = `请分析以下剧本选段，输出分镜预览：\n\n${realSelectedText}`;
+    } else {
+      const historyStr = baseMessages
+        .map(m => `[${m.role === 'user' ? '用户' : 'AI'}]: ${m.content}`)
+        .join('\n\n');
+      userContent = `【当前剧本选段】\n${realSelectedText}\n\n【对话历史】\n${historyStr}\n\n【用户最新消息】\n${userMessage || displayUserMsg}`;
+    }
+
+    try {
+      const response = await fetchApi('/v1/canvas/prompt', {
+        method: 'POST',
+        body: JSON.stringify({
+          model: targetModel,
+          prompt_type: 'fission-preview',
+          params: {},  // 预览无动态参数
+          user_content: userContent,
+          stream: true,
+        }),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        throw new Error(`HTTP ${response.status}: ${errText}`);
+      }
+
+      // ★ 手动解析 SSE 流
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('无法读取响应流');
+
+      const decoder = new TextDecoder();
+      let aiContent = '';
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data:')) continue;
+          const jsonStr = trimmed.slice(5).trim();
+          if (jsonStr === '[DONE]') continue;
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const delta = parsed.choices?.[0]?.delta?.content || '';
+            if (delta) {
+              aiContent += delta;
+              // 流式更新对话面板中的 AI 消息
+              setDialogueMessages([...newMessages, { role: 'assistant', content: aiContent }]);
+            }
+          } catch {}
+        }
+      }
+
+      // ★ 首条 AI 回复完成后，允许用户点击"确认并生成分镜"
+      //    用户可继续多轮调整，按钮始终可用
+      if (aiContent) {
+        setPreviewReady(true);
+      }
+    } catch (err: any) {
+      console.error('[Preview LLM Error]', err);
+      setDialogueMessages([...newMessages, { role: 'assistant', content: '抱歉，预览生成失败，请重试。' }]);
+    } finally {
+      setDialogueLoading(false);
+    }
+  };
 
   // ★ 集数检测结果缓存（避免每次打开弹窗都调 LLM）
   // 缓存键 = 剧本哈希（长度+首尾取样），剧本变更时自动失效
@@ -879,15 +974,22 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
   };
 
 
-  const handleFissionShots = async () => {
+  const handleFissionShots = async (dialogueContext?: string) => {
     // ★ 修复：从 textarea ref 实时读取选区，不依赖可能过期的 React state
     const ta = textareaRef.current;
     const realSelStart = ta?.selectionStart ?? selectionRange.start;
     const realSelEnd = ta?.selectionEnd ?? selectionRange.end;
     const realSelectedText = ta ? ta.value.substring(realSelStart, realSelEnd) : selectedText;
 
-    // ★ 防止重复点击：正在裂变时禁止再次触发（用实时选区值校验）
-    if (data.isGenerating || !realSelectedText) return;
+    // ★ 防止重复点击：正在裂变时禁止再次触发
+    if (data.isGenerating) {
+      useAppStore.getState().setToastMsg('⚠️ 当前节点正在生成中，请等待完成');
+      return;
+    }
+    if (!realSelectedText) {
+      useAppStore.getState().setToastMsg('⚠️ 请先在剧本中框选要拆分的段落');
+      return;
+    }
     if (useAppStore.getState().fissionProgress.status !== 'idle') {
       useAppStore.getState().setToastMsg("⚠️ 分镜裂变正在进行中，请等待完成或点击中止");
       return;
@@ -944,17 +1046,11 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
             });
             if (assetTables.length === 0) dictText = ""; // 没建档就不干扰
 
-            // ✨ 自动扫描当前画布，计算下一次裂变的起始镜号
+            // ★ 分组模式：每次裂变创建一个组，组内镜号从 1 开始独立编号
             const existingShots = getNodes().filter(n => n.type === 'shot');
-            let maxShotNum = 0;
-            existingShots.forEach(n => {
-               const numStr = String(n.data.shotNumber).match(/\d+/);
-               const num = numStr ? parseInt(numStr[0], 10) : 0;
-               if (num > maxShotNum) maxShotNum = num;
-            });
-            const nextShotStart = maxShotNum + 1;
+            const nextShotStart = 1; // 组内始终从 1 开始
 
-            // ★ 构建已有分镜上下文摘要（前后各10个，注入裂变 LLM 以延续空间/时序逻辑）
+            // ★ 构建已有分镜上下文摘要（注入裂变 LLM 以延续空间/时序逻辑）
             const existingShotsSummary = buildExistingShotsSummary(existingShots);
 
       // 导演路由引擎：裂变前解析题材与节奏参数
@@ -1010,6 +1106,22 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
           if (existingShotsSummary) auxParts.push(`画布已有分镜索引：${existingShotsSummary}`);
           if (dictText) auxParts.push(dictText);
           if (data.globalCamera) auxParts.push(`全局摄影参数：${data.globalCamera}`);
+
+          // ★ 对话上下文（用户与AI协商的分镜方案）
+          //    优先使用直接传入的参数（避免 React 状态更新异步导致读不到）
+          const dialogueCtx = dialogueContext ?? data._dialogueContext;
+          if (dialogueCtx) {
+            auxParts.push(`【★ 用户与AI协商确认的分镜拆分方案】
+以下对话记录了用户与AI助手协商分镜的全过程。请从中提取最终确认的拆分方案（每个镜号对应的原文片段覆盖范围），按此填充生产级JSON，不要再重新决策如何拆分。
+
+[协商对话]
+${dialogueCtx}
+[协商结束]
+
+请严格按照上述协商结果填充生产参数。`);
+            // 使用后清除，避免下次裂变误用旧上下文
+            updateNodeData(id, { _dialogueContext: undefined });
+          }
 
           let promptBody = '';
 
@@ -1273,41 +1385,63 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       const baseX = thisNode ? thisNode.position.x : 0;
       const baseY = thisNode ? thisNode.position.y : 0;
 
-      // ★★★ 智能列布局：不同裂变批次自动排列到不同列，永不重叠
-      // 扫描画布上所有已有 ShotNode，按 X 坐标归列（X差 < 200px 算同一列）
-      const allShotNodes = existingShots; // 复用上方已声明的 existingShots
-      const columns: number[] = []; // 每列的 X 坐标中位数
-      allShotNodes.forEach(n => {
-        // 检查是否属于已存在的列
-        const foundCol = columns.find(colX => Math.abs(n.position.x - colX) < 200);
-        if (!foundCol) columns.push(n.position.x);
-      });
-      // 新批次排到下一列
-      const colIndex = columns.length;
-      const targetColumnX = baseX + 850 + colIndex * 650;
+      // ★★★ 网格布局：每组最多 4 列，组间自动避让
+      const COLS_PER_ROW = 4;
+      const COL_WIDTH = 500;   // 节点宽 + 间距
+      const ROW_HEIGHT = 580;  // 节点高 + 间距
+      const shotCount = fissionResult.shots.length;
 
-      // 计算该列的 Y 起始位置（取该列最底部节点的 bottom）
-      let maxBottomY = baseY - 50;
-      allShotNodes.forEach(n => {
-        if (Math.abs(n.position.x - targetColumnX) < 200) {
-          // 优先使用 React Flow 测量的真实高度，回退取 DOM 实际高度，再不行用预估 560px
-          let height = n.measured?.height;
-          if (!height) {
-            const el = document.querySelector(`[data-id="${n.id}"]`) as HTMLElement;
-            height = el?.offsetHeight || 560;
+      // 计算新组尺寸
+      const groupRows = Math.ceil(shotCount / COLS_PER_ROW);
+      const groupContentW = Math.min(shotCount, COLS_PER_ROW) * COL_WIDTH;
+      const groupContentH = groupRows * ROW_HEIGHT;
+
+      // 组起始位置：主控节点右侧
+      let groupStartX = baseX + 850;
+      let groupStartY = baseY - 50;
+
+      // 扫描已有组，向右偏移避免重叠
+      const existingGroups = getNodes().filter(n => n.type === 'group');
+      const GROUP_PAD_X = 80;
+      const GROUP_PAD_TOP = 80;
+      const GROUP_PAD_BOT = 60;
+      const groupW = groupContentW + GROUP_PAD_X * 2;
+      const groupH = groupContentH + GROUP_PAD_TOP + GROUP_PAD_BOT;
+
+      existingGroups.forEach(g => {
+        const gw = (g.style as any)?.width || 500;
+        const gh = (g.style as any)?.height || 500;
+        const gRight = g.position.x + gw;
+        const gBottom = g.position.y + gh;
+        // 垂直重叠检测：新组Y范围与已有组Y范围有交集
+        if (groupStartY < gBottom && groupStartY + groupH > g.position.y) {
+          // 水平方向：推到已有组右侧
+          if (groupStartX < gRight + 80 && groupStartX + groupW > g.position.x - 80) {
+            groupStartX = gRight + 100;
           }
-          const bottom = n.position.y + height;
-          if (bottom > maxBottomY) maxBottomY = bottom;
         }
       });
+
+      // 超宽换行：超过 4500px 则换到下一行
+      if (groupStartX + groupW > baseX + 4500) {
+        groupStartX = baseX + 850;
+        const maxBottom = existingGroups.reduce((max, g) => {
+          const gb = g.position.y + ((g.style as any)?.height || 500);
+          return Math.max(max, gb);
+        }, baseY);
+        groupStartY = maxBottom + 100;
+      }
       
       let newNodes: any[] = [];
       let newEdges: any[] = [];
       let createdShotIds: string[] = []; // ✨ 记录本次生成的节点 ID
 
       fissionResult.shots.forEach((shot: any, index: number) => {
-        // ✨ 痛点修复：大幅拉大 Y 轴间距，避免 2 级卡片挤在一起
-        const targetY = maxBottomY + 80 + (index * 560); 
+        // ★ 网格定位：每行最多 4 个，超出换行
+        const row = Math.floor(index / COLS_PER_ROW);
+        const col = index % COLS_PER_ROW;
+        const targetX = groupStartX + GROUP_PAD_X + col * COL_WIDTH;
+        const targetY = groupStartY + GROUP_PAD_TOP + row * ROW_HEIGHT;
         const shotId = `shot_${Date.now()}_${index}`;
         
         createdShotIds.push(shotId); // 存入记录
@@ -1355,7 +1489,7 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
 
         const newShot = {
           id: shotId, type: 'shot', 
-          position: { x: targetColumnX, y: targetY },
+          position: { x: targetX, y: targetY },
           data: { 
             shotNumber: shot.shotNumber || String(index + 1).padStart(2, '0'), 
             scriptText: shot.scriptFragment || selectedText,
@@ -1413,7 +1547,7 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
           newNodes.push({
             id: splitShotId,
             type: 'shot',
-            position: { x: targetColumnX, y: splitTargetY },
+            position: { x: targetX, y: splitTargetY },
             data: {
               ...newShot.data,
               shotNumber: `${newShot.data.shotNumber}B`,
@@ -1447,10 +1581,28 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
         newNodesCount: newNodes.length,
         newEdgesCount: newEdges.length,
         createdShotIds,
-        targetColumnX,
-        maxBottomY
+        groupStartX,
+        groupStartY,
+        groupW,
+        groupH,
+        shotCount
       });
-      setNodes((nds) => [...nds, ...newNodes]);
+
+      // ★ 分组模式：创建 GroupNode 包裹本次裂变的全部 ShotNode
+      const groupId = `group_${Date.now()}`;
+
+      const groupNode = {
+        id: groupId,
+        type: 'group' as const,
+        position: { x: groupStartX, y: groupStartY },
+        style: { width: groupW, height: groupH, zIndex: -1 },
+        data: {
+          label: `分镜组 ${(getNodes().filter(n => n.type === 'group').length) + 1}`,
+          memberIds: newNodes.map(n => n.id),
+        },
+      };
+
+      setNodes((nds) => [...nds, groupNode, ...newNodes]);
       setEdges((eds) => [...eds, ...newEdges]);
       
       // ✨ 痛点修复：将生成的 shotIds 数组绑定到书签上
@@ -1463,7 +1615,6 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       };
       const updatedExtractedScenes = [...(data.extractedScenes || []), newExtractedScene];
 
-      setShowBookmarks(true);
       updateNodeData(id, { sceneInterceptState: 'idle', extractedScenes: updatedExtractedScenes });
       setSelectedText(""); 
       useAppStore.getState().setFissionProgress({ status: 'idle', phase: '', mode: 'generating' }); // ★ 重置进度条
@@ -1569,7 +1720,6 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       const newExtractedScene = { id: tableId, text: selectedText, start: selectionRange.start, end: selectionRange.end };
       const updatedExtractedScenes = [...(data.extractedScenes || []), newExtractedScene];
 
-      setShowBookmarks(true);
       updateNodeData(id, { isGenerating: false, sceneInterceptState: 'idle', extractedScenes: updatedExtractedScenes });
       setSelectedText("");
       useAppStore.getState().setFissionProgress({ status: 'idle', phase: '', mode: 'generating' });
@@ -1642,8 +1792,8 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
 
   return (
     <>
-    <div className="relative group/node z-30 flex flex-col" style={{ width: '100%', height: '100%', minWidth: '480px', minHeight: '420px' }}>
-      <NodeResizeControl minWidth={480} minHeight={420} position="bottom-right" style={{ background: 'transparent', border: 'none', width: '20px', height: '20px', right: '12px', bottom: '12px' }}>
+    <div className="relative group/node z-30 flex flex-col" style={{ width: '100%', height: '100%', minWidth: '880px', minHeight: '520px' }}>
+      <NodeResizeControl minWidth={880} minHeight={520} position="bottom-right" style={{ background: 'transparent', border: 'none', width: '20px', height: '20px', right: '12px', bottom: '12px' }}>
          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-zinc-600 hover:text-white cursor-se-resize opacity-0 group-hover/node:opacity-100 transition-opacity drop-shadow-[0_0_5px_rgba(255,255,255,0.5)]">
              <polyline points="21 15 21 21 15 21"></polyline><line x1="21" y1="21" x2="15" y2="15"></line>
          </svg>
@@ -1651,187 +1801,328 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       
       <Handle type="source" position={Position.Right} id="right" className={handleRight} />
       
-      <div className={`w-full h-full flex-1 ${nodeBaseClass} ${selected ? selectedBorderClass : unselectedBorderClass} flex flex-col p-5 overflow-hidden relative`}>
+      {/* ★ 主卡片：MasterScriptNode 专属中性渐变 */}
+      <div className={`w-full h-full flex-1 ${nodeBaseClass} glass-card-master ${selected ? selectedBorderClass : ''} flex flex-col p-5 overflow-hidden`}>
         
-      <div className="flex items-center gap-3 mb-4 border-b border-white/[0.05] pb-3 shrink-0">
-          <div className="w-8 h-8 rounded-[10px] bg-white/10 border border-white/20 flex items-center justify-center shadow-[inset_0_1px_1px_rgba(255,255,255,0.2)] pointer-events-none">
-            <Type size={14} className="text-white" />
-          </div>
-          <div className="flex flex-col pointer-events-none">
-            <span className="text-[14px] font-bold text-white tracking-widest">主剧本控制台</span>
-            <span className="text-[9px] text-zinc-500 font-mono tracking-wider mt-0.5">MASTER SCRIPT 2.1</span>
-          </div>
-          
-          {(data.extractedScenes && data.extractedScenes.length > 0) && (
-            <button 
-              onClick={(e) => { e.stopPropagation(); setShowBookmarks(!showBookmarks); }}
-              className={`ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[10px] font-mono tracking-widest transition-all shadow-md nodrag ${showBookmarks ? 'bg-white/20 border-white/30 text-white' : 'bg-white/5 border-white/10 text-zinc-400 hover:bg-white/10 hover:text-white'}`}
-            >
-              <Clapperboard size={12} className={showBookmarks ? "text-white" : "text-zinc-500"} />
-              已拆分 ({data.extractedScenes.length})
-            </button>
-          )}
-          {/* ✨ 全新：前置资产数据表裂变入口 */}
-          {data.globalCamera && (
-            <div className="relative ml-2">
-              <button 
-                onClick={(e) => { e.stopPropagation(); setShowAssetMenu(!showAssetMenu); setShowBookmarks(false); }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[10px] font-bold tracking-widest transition-all shadow-md nodrag ${showAssetMenu || extractingAsset ? 'bg-white/[0.08] border-white/20 text-white' : 'bg-white/[0.03] border-white/[0.08] text-zinc-400 hover:bg-white/[0.06] hover:text-white'}`}
-              >
-                {extractingAsset ? <Loader2 size={12} className="animate-spin"/> : <Database size={12} />}
-                前置资产建档 <ChevronDown size={12} className={showAssetMenu ? "rotate-180 transition-transform" : "transition-transform"}/>
-              </button>
-              {/* 下拉菜单 */}
-              {showAssetMenu && (
-                <div className="absolute top-[calc(100%+8px)] left-0 w-[160px] bg-[#0a0a0c]/95 backdrop-blur-3xl border border-white/20 rounded-[12px] shadow-2xl p-1 z-50 animate-in fade-in zoom-in-95">
-                  <button onClick={() => handleExtractAssetTable('scene')} className="w-full flex items-center gap-2 px-3 py-2 text-[11px] text-zinc-300 hover:text-white hover:bg-white/10 rounded-[8px] transition-all text-left"><Map size={12} className="text-emerald-400"/> 提取场景表</button>
-                  <button onClick={() => handleExtractAssetTable('character')} className="w-full flex items-center gap-2 px-3 py-2 text-[11px] text-zinc-300 hover:text-white hover:bg-white/10 rounded-[8px] transition-all text-left"><Users size={12} className="text-amber-400"/> 提取角色表</button>
-                  <button onClick={() => handleExtractAssetTable('prop')} className="w-full flex items-center gap-2 px-3 py-2 text-[11px] text-zinc-300 hover:text-white hover:bg-white/10 rounded-[8px] transition-all text-left"><Package size={12} className="text-fuchsia-400"/> 提取道具表</button>
-                </div>
-              )}
+        {/* ── 头部：标题左 + 功能按钮右 ── */}
+        <div className="flex items-center justify-between pb-3 border-b border-white/[0.05] shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-[10px] bg-white/[0.06] border border-white/[0.08] flex items-center justify-center">
+              <Type size={14} className="text-zinc-300" />
             </div>
-          )}
-        </div>
-
-        {data.globalCamera && (
-          <div className="mb-4 p-3 bg-black/50 rounded-[16px] border border-white/10 shadow-inner shrink-0 group/cam transition-all">
-             <div className="flex flex-col">
-             <label className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5 pl-1 flex items-center justify-between pointer-events-none">
-                 全局摄影机预设 (Global Camera) <Settings2 size={12} className="text-zinc-400 group-hover/cam:rotate-90 transition-transform duration-500"/>
-               </label>
-               <textarea 
-                 data-node-id={id} data-field="globalCamera" data-field-label="全局摄影机预设"
-                 className="bg-transparent border border-white/[0.05] rounded-[8px] p-2 focus:border-white/30 focus:bg-white/[0.02] text-[12px] text-zinc-300 outline-none w-full font-mono transition-colors nodrag nopan resize-none custom-scrollbar"
-                 rows={3} value={data.globalCamera} onChange={(e) => updateNodeData(id, { globalCamera: e.target.value })} onWheelCapture={(e) => { if (!e.ctrlKey && !e.metaKey) e.stopPropagation(); }}
-               />
-             </div>
+            <div className="flex flex-col">
+              <span className="text-[14px] font-bold text-white tracking-widest">主剧本控制台</span>
+              <span className="text-[9px] text-zinc-500 font-mono tracking-wider mt-0.5">MASTER SCRIPT 2.1</span>
+            </div>
           </div>
-        )}
 
-        <textarea 
-          ref={textareaRef}
-          className="flex-1 w-full h-full bg-transparent text-[14px] text-zinc-200 placeholder-zinc-600 resize-none outline-none custom-scrollbar leading-relaxed nodrag nopan"
-          placeholder="[在此粘贴几万字完整剧情大纲或剧本...]"
-          value={data.text || ''} onChange={(e) => updateNodeData(id, { text: e.target.value })} onSelect={handleTextSelect} onWheelCapture={(e) => { if (!e.ctrlKey && !e.metaKey) e.stopPropagation(); }}
-          data-node-id={id} data-field="text" data-field-label="剧本内容"
-        />
-      </div>
-
-      {/* ✨ 侧边悬浮黑玻璃书签抽屉 */}
-      {showBookmarks && (data.extractedScenes && data.extractedScenes.length > 0) && (
-        <div className="absolute top-0 right-[-260px] w-[240px] h-full flex flex-col bg-[#0a0a0c]/95 backdrop-blur-3xl border border-white/[0.1] rounded-[24px] shadow-[0_40px_100px_rgba(0,0,0,0.95)] animate-in fade-in slide-in-from-left-4 z-40 overflow-hidden nodrag nopan">
-          <div className="px-4 py-3.5 border-b border-white/5 flex items-center justify-between bg-white/[0.02] shrink-0">
-             <span className="text-[11px] font-bold text-zinc-300 tracking-widest flex items-center gap-2">
-               <Clapperboard size={12} className="text-zinc-400"/> 场记书签库
-             </span>
-             <button onClick={() => { setShowBookmarks(false); updateNodeData(id, { activeTargetIds: [] }); }} className="text-zinc-500 hover:text-white transition-colors"><X size={14}/></button>
-          </div>
-          
-          <div className="p-3 flex flex-col gap-2 overflow-y-auto custom-scrollbar flex-1">
-            {data.extractedScenes.map((scene: any, idx: number) => {
-               // ✨ 修正高亮判断逻辑：比对 targetIds 数组的第一个元素是否匹配
-               const isActive = data.activeTargetIds && data.activeTargetIds.length > 0 && data.activeTargetIds[0] === scene.targetIds?.[0];
-               
-               return (
-               <div
-                 key={scene.id}
-                 onClick={() => {
-                  if (textareaRef.current) {
-                    textareaRef.current.focus();
-                    textareaRef.current.setSelectionRange(scene.start, scene.end);
-                    setSelectedText(scene.text);
-                    setSelectionRange({ start: scene.start, end: scene.end });
-                  }
-                  // ✨ 修复：点击书签时，触发边缘高亮！告诉全局只有这些连线要发光
-                  updateNodeData(id, { activeTargetIds: scene.targetIds });
-                }}
-                 className={`flex flex-col gap-1.5 p-3 rounded-[12px] bg-[#050505] border cursor-pointer transition-all group/slice shrink-0 shadow-[0_0_15px_rgba(0,0,0,0.5)] ${isActive ? 'border-white/40 bg-white/10 shadow-[inset_0_0_20px_rgba(255,255,255,0.1)]' : 'border-white/5 hover:border-white/30 hover:bg-white/10 shadow-inner'}`}
-               >
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-mono font-bold text-zinc-400 group-hover/slice:text-white">SHOT {String(idx+1).padStart(2,'0')}</span>
-                  </div>
-                  <div className="text-[11px] text-zinc-500 line-clamp-3 leading-relaxed group-hover/slice:text-zinc-300 transition-colors">
-                    {scene.text}
-                  </div>
-               </div>
-               );
-            })}
-          </div>
-        </div>
-      )}
-
-
-      {/* 分镜方法横向选择栏（黑色液态玻璃风格）— ★ 固定最小宽度，不受中控台大小影响 */}
-      <div className={`absolute bottom-[-20px] left-1/2 -translate-x-1/2 min-w-[640px] translate-y-full bg-[#0a0a0c]/95 backdrop-blur-3xl border border-white/[0.08] rounded-[20px] shadow-[0_40px_100px_rgba(0,0,0,0.95)] transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] z-[100] ${(!data.globalCamera || selectedText ? 'px-5 py-3 scale-100 opacity-100' : 'scale-90 opacity-0 pointer-events-none')} ${!data.globalCamera ? 'flex justify-center' : ''}`}>
-        {!data.globalCamera ? (
-          <>
-            <button onClick={handleExtractCamera} disabled={data.isExtractingCamera} className="flex items-center justify-center gap-2 px-5 py-2 bg-white/[0.06] border border-white/[0.08] hover:bg-white/[0.1] text-zinc-200 rounded-[12px] text-[12px] font-semibold transition-all whitespace-nowrap nodrag">
-              {data.isExtractingCamera ? <Loader2 size={14} className="animate-spin" /> : <Settings2 size={14} />} 锚定全片摄影机
-            </button>
-          </>
-        ) : (
-          <div className="flex items-center gap-4">
-            {/* ★ 按集选择 - 独立入口 */}
+          <div className="flex items-center gap-2">
+            {/* 按集选择按钮 */}
             <button
               onClick={() => { getOrOpenEpisodeSelect('fission'); }}
               disabled={data.isGenerating}
-              className="flex items-center gap-1.5 px-4 py-2 text-[12px] font-medium text-zinc-300 bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.08] hover:text-white rounded-[12px] transition-all whitespace-nowrap nodrag"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[11px] font-medium text-zinc-400 bg-white/[0.03] border-white/[0.06] hover:bg-white/[0.06] hover:text-white transition-all nodrag"
             >
-              📋 按集选择
+              <List size={12} />
+              按集选择
             </button>
 
-            {/* ★ 分界线 */}
-            <div className="w-px h-6 bg-white/[0.06]" />
+            {/* 摄影机锁定按钮 */}
+            <button
+              onClick={handleExtractCamera}
+              disabled={data.isExtractingCamera}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[11px] font-medium transition-all nodrag ${
+                data.globalCamera
+                  ? 'bg-white/[0.06] border-white/[0.12] text-zinc-300'
+                  : 'bg-white/[0.03] border-white/[0.06] text-zinc-400 hover:bg-white/[0.06] hover:text-white'
+              }`}
+            >
+              {data.isExtractingCamera ? <Loader2 size={12} className="animate-spin" /> : <Camera size={12} />}
+              {data.globalCamera ? '摄影机已锁定' : '锚定摄影机'}
+            </button>
 
-            {/* ★ 4 种分镜方法标签 */}
-            <div className="flex items-center gap-1">
-              {([
-                { key: 'general' as const, Icon: Layers, label: '通用分镜', isImplemented: true, subtitle: selectedText.length > 0 ? `${selectedText.length}字·点击执行` : undefined },
-                { key: 'long15s' as const, Icon: Film, label: '15s', isImplemented: false, subtitle: '功能即将上线' },
-                { key: 'long30s' as const, Icon: Film, label: '30s', isImplemented: false, subtitle: '功能即将上线' },
-                { key: 'table' as const, Icon: Table, label: '表格分镜', isImplemented: false, subtitle: '功能即将上线' },
-              ]).map(m => {
-                const isActive = fissionMethod === m.key;
-                return (
-                  <button
-                    key={m.key}
-                    onClick={() => {
-                      if (isActive) {
-                        // ★ 已选中该分镜方法 → 直接执行
-                        if (m.isImplemented) {
-                          // ★ 通用分镜：调用现有裂变逻辑
-                          if (m.key === 'general') handleFissionShots();
-                          // ★ 未来其他已实现方法在此接入
-                        } else {
-                          useAppStore.getState().setToastMsg(`⏳ ${m.label}分镜即将上线`);
-                        }
-                      } else {
-                        // ★ 切换到此方法（记住偏好，下次默认出现此方法）
-                        setCanvasSettings((prev: any) => ({ ...prev, fissionMethod: m.key }));
-                        if (!m.isImplemented) useAppStore.getState().setToastMsg(`⏳ 已切换至「${m.label}」，功能即将上线`);
-                      }
-                    }}
-                    disabled={data.isGenerating}
-                    className={`flex flex-col items-center gap-0.5 px-4 py-2 rounded-[14px] transition-all text-[12px] font-semibold whitespace-nowrap nodrag ${
-                      isActive
-                        ? m.isImplemented
-                          ? 'bg-white/[0.06] text-white border-b-2 border-white/30 rounded-b-[8px]'
-                          : 'bg-white/[0.03] text-zinc-400 border-b-2 border-white/15 rounded-b-[8px]'
-                        : m.isImplemented
-                          ? 'bg-transparent text-zinc-400 hover:text-white hover:bg-white/[0.04] border-b-2 border-transparent'
-                          : 'text-zinc-600/40 hover:text-zinc-500 hover:bg-white/[0.02] border-b-2 border-transparent'
-                    }`}
-                  >
-                    <span className="flex items-center gap-1.5"><m.Icon size={13} />{m.label}</span>
-                    {isActive && m.subtitle && (
-                      <span className={`text-[10px] font-normal ${m.isImplemented ? 'text-zinc-500' : 'text-zinc-600/50'}`}>{m.subtitle}</span>
-                    )}
-                  </button>
-                );
-              })}
+            {/* 资产提取按钮（摄影机锁定后才显示） */}
+            {data.globalCamera && (
+              <div className="relative">
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowAssetMenu(!showAssetMenu); }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[11px] font-medium transition-all nodrag ${
+                    showAssetMenu || extractingAsset
+                      ? 'bg-white/[0.08] border-white/[0.15] text-white'
+                      : 'bg-white/[0.03] border-white/[0.06] text-zinc-400 hover:bg-white/[0.06] hover:text-white'
+                  }`}
+                >
+                  {extractingAsset ? <Loader2 size={12} className="animate-spin" /> : <Database size={12} />}
+                  资产提取
+                  <ChevronDown size={12} className={showAssetMenu ? "rotate-180 transition-transform" : "transition-transform"} />
+                </button>
+                {showAssetMenu && (
+                  <div className="absolute top-[calc(100%+6px)] right-0 w-[150px] bg-[#0a0a0c]/95 backdrop-blur-3xl border border-white/[0.12] rounded-[12px] shadow-2xl p-1 z-50 animate-in fade-in zoom-in-95 nodrag">
+                    <button onClick={() => handleExtractAssetTable('scene')} className="w-full flex items-center gap-2 px-3 py-2 text-[11px] text-zinc-300 hover:text-white hover:bg-white/[0.08] rounded-[8px] transition-all text-left"><Map size={12} className="text-zinc-400" /> 提取场景表</button>
+                    <button onClick={() => handleExtractAssetTable('character')} className="w-full flex items-center gap-2 px-3 py-2 text-[11px] text-zinc-300 hover:text-white hover:bg-white/[0.08] rounded-[8px] transition-all text-left"><Users size={12} className="text-zinc-400" /> 提取角色表</button>
+                    <button onClick={() => handleExtractAssetTable('prop')} className="w-full flex items-center gap-2 px-3 py-2 text-[11px] text-zinc-300 hover:text-white hover:bg-white/[0.08] rounded-[8px] transition-all text-left"><Package size={12} className="text-zinc-400" /> 提取道具表</button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── 内容区：左右分栏（对话展开时三栏）── */}
+        <div className="flex-1 flex gap-4 mt-4 min-h-0">
+
+          {/* 左栏：摄影机预设 + 剧本 */}
+          <div className="flex flex-col gap-3 min-h-0 w-[55%]">
+            {/* 摄影机预设（可折叠） */}
+            {data.globalCamera && (
+              <div className="shrink-0 p-3 bg-black/30 rounded-[12px] border border-white/[0.04]">
+                <label className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5 block">
+                  全局摄影机预设 (Global Camera)
+                </label>
+                <textarea
+                  data-node-id={id} data-field="globalCamera" data-field-label="全局摄影机预设"
+                  className="bg-transparent border border-white/[0.04] rounded-[8px] p-2 focus:border-white/20 focus:bg-white/[0.02] text-[12px] text-zinc-300 outline-none w-full font-mono transition-colors nodrag nopan resize-none custom-scrollbar"
+                  rows={2}
+                  value={data.globalCamera}
+                  onChange={(e) => updateNodeData(id, { globalCamera: e.target.value })}
+                  onWheelCapture={(e) => { if (!e.ctrlKey && !e.metaKey) e.stopPropagation(); }}
+                />
+              </div>
+            )}
+
+            {/* 剧本内容容器 */}
+            <div className="flex-1 min-h-0 rounded-[14px] border border-white/[0.04] bg-black/20 overflow-hidden flex">
+              <div className="w-[2px] bg-white/[0.04] shrink-0" />
+              <textarea
+                ref={textareaRef}
+                className="flex-1 bg-transparent text-[14px] text-zinc-200 placeholder-zinc-600 resize-none outline-none custom-scrollbar leading-relaxed nodrag nopan p-4"
+                placeholder="[在此粘贴几万字完整剧情大纲或剧本...]"
+                value={data.text || ''}
+                onChange={(e) => updateNodeData(id, { text: e.target.value })}
+                onSelect={handleTextSelect}
+                onWheelCapture={(e) => { if (!e.ctrlKey && !e.metaKey) e.stopPropagation(); }}
+                data-node-id={id} data-field="text" data-field-label="剧本内容"
+              />
             </div>
           </div>
-        )}
+
+          {/* 右栏：分镜方法 + 预览 + 书签 */}
+          <div className="flex flex-col min-h-0 w-[45%]">
+            <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-1 mb-3 shrink-0">分镜</span>
+
+            {/* ★ 已实现方法：大卡片突出 */}
+            <div
+              onClick={() => {
+                if (dialogueLoading) return;
+                if (!selectedText) {
+                  useAppStore.getState().setToastMsg('请先在剧本中框选要拆分的段落');
+                  return;
+                }
+                setDialogueOpen(true);
+                setDialogueMessages([]);
+                setPreviewReady(false);
+                sendPreviewToLLM(undefined, true);
+              }}
+              className={`method-card method-card-active nodrag cursor-pointer mb-4 ${dialogueLoading ? 'opacity-40 pointer-events-none' : ''} ${!selectedText ? 'opacity-50' : ''}`}
+            >
+              <div className="flex items-center gap-2.5 mb-2">
+                <div className="w-7 h-7 rounded-[8px] bg-white/[0.08] border border-white/[0.1] flex items-center justify-center">
+                  <Layers size={14} className="text-zinc-200" />
+                </div>
+                <span className="text-[13px] font-bold text-white tracking-wider">通用分镜</span>
+                <span className="ml-auto w-1.5 h-1.5 rounded-full bg-white/50" />
+              </div>
+              <div className="text-[11px] text-zinc-400 leading-relaxed">
+                {selectedText ? `已选 ${selectedText.length} 字 · 点击开始预览` : '框选剧本后点击执行'}
+              </div>
+            </div>
+
+            {/* ★ 分割线 */}
+            <div className="flex items-center gap-2 mb-3 shrink-0">
+              <div className="flex-1 h-px bg-white/[0.04]" />
+              <span className="text-[9px] text-zinc-600 font-mono tracking-wider">即将上线</span>
+              <div className="flex-1 h-px bg-white/[0.04]" />
+            </div>
+
+            {/* ★ 未实现方法：紧凑列表 */}
+            <div className="flex flex-col gap-0.5 shrink-0">
+              {([
+                { key: 'long15s' as const, Icon: Film, label: '长镜头 15s' },
+                { key: 'long30s' as const, Icon: Film, label: '长镜头 30s' },
+                { key: 'table' as const, Icon: Table, label: '表格分镜' },
+              ]).map(m => (
+                <div
+                  key={m.key}
+                  onClick={() => useAppStore.getState().setToastMsg(`⏳ ${m.label}即将上线`)}
+                  className="flex items-center gap-2.5 px-3 py-2 rounded-[10px] text-zinc-600/50 cursor-pointer hover:bg-white/[0.02] hover:text-zinc-500 transition-all nodrag"
+                >
+                  <m.Icon size={13} />
+                  <span className="text-[11px] font-medium">{m.label}</span>
+                  <span className="ml-auto text-[9px] text-zinc-700">即将上线</span>
+                </div>
+              ))}
+            </div>
+
+            {/* ★ 空状态：未打开分镜预览时，居中展示引导文字 */}
+            {!dialogueOpen && (
+              <div className="flex-1 flex flex-col items-center justify-center min-h-0 mt-3 nodrag" style={{ cursor: 'default' }}>
+                <div className="text-center px-2">
+                  <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-white/[0.03] mb-5">
+                    <Clapperboard size={20} className="text-zinc-500" />
+                  </div>
+                  <p className="text-[13px] font-semibold text-zinc-400 tracking-wider mb-5">分镜预览</p>
+                  <p className="text-[12px] text-zinc-500 leading-relaxed">
+                    选定剧本段落，选择适合你的分镜方法
+                  </p>
+                  <p className="text-[12px] text-zinc-500 leading-relaxed mt-1.5">
+                    AI 解析叙事结构，输出分镜预案
+                  </p>
+                  <p className="text-[12px] text-zinc-500 leading-relaxed mt-1.5">
+                    多轮协商调整后，确认执行裂变
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* ★ 分镜预览区（点击通用分镜后显示，flex-1 自动填满） */}
+            {dialogueOpen && (
+              <div
+                className="flex-1 flex flex-col min-h-0 mt-3 border-t border-white/[0.05] pt-3"
+                onWheelCapture={(e) => e.stopPropagation()}
+              >
+                {/* 预览头部 */}
+                <div className="flex items-center justify-between mb-2 shrink-0">
+                  <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
+                    分镜预览{dialogueLoading ? ' · 分析中' : previewReady ? ' · 完成' : ''}
+                  </span>
+                  <button
+                    onClick={() => { setDialogueOpen(false); setDialogueMessages([]); setPreviewReady(false); }}
+                    className="text-zinc-600 hover:text-white transition-colors"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+
+                {/* 消息列表（nodrag + userSelect:text 允许选中文字复制） */}
+                <div
+                  className="flex-1 overflow-y-auto custom-scrollbar space-y-2.5 mb-2 min-h-0 nodrag nowheel"
+                  style={{ cursor: 'default' }}
+                  onWheelCapture={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  {dialogueMessages.length === 0 && dialogueLoading ? (
+                    <div className="flex items-center gap-2 text-zinc-500 text-[12px] py-4">
+                      <Loader2 size={14} className="animate-spin" />
+                      AI 分析中...
+                    </div>
+                  ) : (
+                    dialogueMessages.map((msg, i) => (
+                      <div key={i} className={`${msg.role === 'assistant' ? 'dialogue-bubble-ai' : 'dialogue-bubble-user'}`} style={{ userSelect: 'text', cursor: 'text' }}>
+                        <div className="whitespace-pre-wrap text-[12px] leading-relaxed" style={{ userSelect: 'text', cursor: 'text' }}>{msg.content}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* 输入区 */}
+                <div className="flex gap-1.5 shrink-0">
+                  <input
+                    type="text"
+                    value={dialogueInput}
+                    onChange={(e) => setDialogueInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && dialogueInput.trim() && !dialogueLoading) {
+                        sendPreviewToLLM(dialogueInput.trim());
+                        setDialogueInput('');
+                      }
+                    }}
+                    placeholder="输入调整意见，回车发送..."
+                    disabled={dialogueLoading}
+                    className="flex-1 bg-white/[0.04] border border-white/[0.06] rounded-[8px] px-2.5 py-1.5 text-[12px] text-zinc-200 placeholder-zinc-600 outline-none focus:border-white/[0.15] transition-colors disabled:opacity-40"
+                  />
+                  <button
+                    onClick={() => {
+                      if (dialogueInput.trim() && !dialogueLoading) {
+                        sendPreviewToLLM(dialogueInput.trim());
+                        setDialogueInput('');
+                      }
+                    }}
+                    disabled={!dialogueInput.trim() || dialogueLoading}
+                    className="px-2.5 py-1.5 rounded-[8px] bg-white/[0.06] border border-white/[0.08] text-zinc-400 hover:text-white hover:bg-white/[0.1] transition-all disabled:opacity-30"
+                  >
+                    <Send size={13} />
+                  </button>
+                </div>
+
+                {/* 操作按钮 */}
+                <div className="flex items-center justify-between mt-2 shrink-0">
+                  <button
+                    onClick={() => { setDialogueOpen(false); setDialogueMessages([]); setPreviewReady(false); }}
+                    className="px-3 py-1 rounded-[8px] text-[11px] text-zinc-500 hover:text-white hover:bg-white/[0.05] transition-all"
+                  >
+                    放弃
+                  </button>
+                  <button
+                    disabled={dialogueLoading}
+                    onClick={() => {
+                      if (dialogueLoading) return;
+                      const dialogueContext = dialogueMessages.map(m => `[${m.role}]: ${m.content}`).join('\n');
+                      if (!dialogueContext) {
+                        useAppStore.getState().setToastMsg('预览对话为空，请先完成分镜预览');
+                        return;
+                      }
+                      handleFissionShots(dialogueContext);
+                    }}
+                    className={`px-3 py-1 rounded-[8px] text-[11px] font-medium transition-all ${
+                      dialogueLoading
+                        ? 'bg-white/[0.04] border border-white/[0.06] text-zinc-500 cursor-not-allowed'
+                        : 'bg-white/[0.1] border border-white/[0.15] text-white hover:bg-white/[0.15] cursor-pointer'
+                    }`}
+                  >
+                    确认并生成分镜 →
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* 书签列表（已拆分镜头） */}
+            {data.extractedScenes && data.extractedScenes.length > 0 && (
+              <div className="shrink-0 mt-2 flex flex-col gap-1.5 overflow-y-auto custom-scrollbar max-h-[120px]">
+                <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-1">
+                  已拆分 ({data.extractedScenes.length})
+                </span>
+                {data.extractedScenes.map((scene: any, idx: number) => {
+                  const isActive = data.activeTargetIds && data.activeTargetIds.length > 0 && data.activeTargetIds[0] === scene.targetIds?.[0];
+                  return (
+                    <div
+                      key={scene.id}
+                      onClick={() => {
+                        if (textareaRef.current) {
+                          textareaRef.current.focus();
+                          textareaRef.current.setSelectionRange(scene.start, scene.end);
+                          setSelectedText(scene.text);
+                          setSelectionRange({ start: scene.start, end: scene.end });
+                        }
+                        updateNodeData(id, { activeTargetIds: scene.targetIds });
+                      }}
+                      className={`flex items-center gap-2 px-2.5 py-1.5 rounded-[8px] cursor-pointer transition-all nodrag ${
+                        isActive
+                          ? 'bg-white/[0.08] border border-white/[0.15]'
+                          : 'bg-white/[0.02] border border-white/[0.03] hover:bg-white/[0.04] hover:border-white/[0.08]'
+                      }`}
+                    >
+                      <span className={`text-[10px] font-mono font-bold ${isActive ? 'text-white' : 'text-zinc-500'}`}>
+                        {String(idx + 1).padStart(2, '0')}
+                      </span>
+                      <span className="text-[11px] text-zinc-500 truncate">{scene.text}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+        </div>
       </div>
     </div>
 
@@ -2180,7 +2471,7 @@ const _ShotNode = ({ id, data, selected }: any) => {
       
       {zenMode && <ZenEditor label={zenMode.label} value={data[zenMode.field] || ''} onChange={(val: string) => updateNodeData(id, { [zenMode.field]: val })} onClose={() => setZenMode(null)} dataAttrs={{ 'data-node-id': id, 'data-field': zenMode.field, 'data-field-label': zenMode.label }} />}
 
-      <div className={`relative rounded-[24px] bg-[#18181b]/80 backdrop-blur-3xl border ${selected ? 'border-white/30 shadow-2xl' : 'border-white/[0.08]'} flex flex-col p-2 transition-all duration-500`}>
+      <div className={`glass-card glass-card-hover ${selected ? 'glass-card-selected' : ''} flex flex-col p-2`}>
         <div className="flex items-center justify-between px-2 pt-1 pb-2">
           <span className="bg-white/10 text-white px-2 py-0.5 rounded-[6px] text-[10px] font-mono font-bold shadow-inner">SHOT {data.shotNumber}</span>
         </div>
@@ -2611,7 +2902,7 @@ const _VideoClipNode = ({ id, data, selected }: any) => {
         </div>
       )}
       
-      <div className={`${nodeBaseClass} ${selected ? selectedBorderClass : unselectedBorderClass} flex flex-col p-2 transition-all duration-500`}>
+      <div className={`${nodeBaseClass} ${selected ? selectedBorderClass : ''} flex flex-col p-2 transition-all duration-500`}>
         
         {/* 头部：展示接收到的算力时长 + 脏数据警报 */}
         <div className="flex items-center justify-between px-2 pt-1 pb-2 relative">
@@ -3113,7 +3404,7 @@ const _MediaNode = ({ id, data, selected }: any) => {
         </div>
       )}
 
-      <div style={currentStyle} className={`${nodeBaseClass} ${selected ? selectedBorderClass : unselectedBorderClass} overflow-hidden flex flex-col p-1 transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)]`}>
+      <div style={currentStyle} className={`${nodeBaseClass} ${selected ? selectedBorderClass : ''} overflow-hidden flex flex-col p-1 transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)]`}>
         <div className="w-full h-full relative flex items-center justify-center bg-transparent rounded-[20px] overflow-hidden">
         {displayImage ? (
             <div className="relative w-full h-full">
@@ -3449,7 +3740,7 @@ const _RenderNode = ({ id, data, selected }: any) => {
         </div>
       )}
 
-<div style={currentStyle} className={`${nodeBaseClass} ${selected ? selectedBorderClass : unselectedBorderClass} overflow-hidden flex flex-col p-1.5 transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)]`}>
+<div style={currentStyle} className={`${nodeBaseClass} ${selected ? selectedBorderClass : ''} overflow-hidden flex flex-col p-1.5 transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)]`}>
         <div className="w-full h-full relative flex items-center justify-center bg-transparent rounded-[20px] overflow-hidden">
           {displayVideo ? (
             <video key={displayVideo} src={displayVideo} preload="metadata" className="w-full h-full max-h-[500px] object-contain rounded-[18px]" controls autoPlay loop muted playsInline />
@@ -3623,7 +3914,7 @@ const _CombineNode = ({ data }: any) => {
       {/* ✨ 将触点放在外壳上 */}
       <Handle type="target" position={Position.Left} id="left" className={handleLeft} />
       
-      <div className={`${nodeBaseClass} ${unselectedBorderClass} w-[400px] aspect-video overflow-hidden flex flex-col p-1.5`}>
+      <div className={`${nodeBaseClass} w-[400px] aspect-video overflow-hidden flex flex-col p-1.5`}>
         <div className="w-full h-full relative flex items-center justify-center bg-black rounded-[20px] overflow-hidden">
           {data.resultUrl ? (
             <video key={data.resultUrl} src={data.resultUrl} preload="auto" className="w-full h-full object-contain rounded-[20px]" controls autoPlay loop muted playsInline />
@@ -3675,7 +3966,7 @@ const _ScriptTableNode = ({ id, data, selected }: any) => {
       <Handle type="target" position={Position.Left} id="left" className={handleLeft} />
       <Handle type="source" position={Position.Right} id="right" className={handleRight} />
       
-      <div className={`${nodeBaseClass} ${selected ? selectedBorderClass : unselectedBorderClass} flex flex-col p-4 transition-all duration-500`}>
+      <div className={`${nodeBaseClass} ${selected ? selectedBorderClass : ''} flex flex-col p-4 transition-all duration-500`}>
         
         {/* 表格头部信息 */}
         <div className="flex items-center justify-between border-b border-white/5 pb-3 mb-4 shrink-0">
@@ -4001,7 +4292,7 @@ const _AssetTableNode = ({ id, data, selected }: any) => {
         document.body
       )}
 
-      <div className={`${nodeBaseClass} ${selected ? selectedBorderClass : unselectedBorderClass} flex flex-col p-4 transition-all duration-500`}>
+      <div className={`${nodeBaseClass} ${selected ? selectedBorderClass : ''} flex flex-col p-4 transition-all duration-500`}>
         
         {/* 头部信息 */}
         <div className="flex items-center justify-between border-b border-white/5 pb-3 mb-3 shrink-0">
@@ -4158,7 +4449,7 @@ const _TextNode = ({ id, data, selected }: any) => {
       <Handle type="target" position={Position.Left} id="left" className={handleLeft} />
       <Handle type="source" position={Position.Right} id="right" className={handleRight} />
 
-      <div className={`${nodeBaseClass} ${selected ? selectedBorderClass : unselectedBorderClass} flex flex-col p-4`}>
+      <div className={`${nodeBaseClass} ${selected ? selectedBorderClass : ''} flex flex-col p-4`}>
         <div className="flex items-center gap-2 mb-3 pb-2 border-b border-white/5">
           <Type size={14} className="text-zinc-400" />
           <span className="text-[12px] font-bold text-white tracking-widest">文本备注 (Note)</span>
@@ -4379,7 +4670,7 @@ const _PanoramaNode = ({ id, data, selected }: any) => {
       <Handle type="target" position={Position.Left} id="left" className={handleLeft} />
       <Handle type="source" position={Position.Right} id="right" className={handleRight} />
 
-      <div style={{ width: `${panoStyle.width}px` }} className={`${nodeBaseClass} ${selected ? selectedBorderClass : unselectedBorderClass} flex flex-col p-3`}>
+      <div style={{ width: `${panoStyle.width}px` }} className={`${nodeBaseClass} ${selected ? selectedBorderClass : ''} flex flex-col p-3`}>
         {/* ★ 节点头部 — 黑色液态玻璃风格 */}
         <div className="flex items-center gap-2 mb-3 pb-2 border-b border-white/[0.06]">
           <Globe size={14} className="text-zinc-400" />
@@ -4519,3 +4810,109 @@ const _PanoramaNode = ({ id, data, selected }: any) => {
   );
 };
 export const PanoramaNode = React.memo(_PanoramaNode);
+
+// ═══════════════════════════════════════════════════════
+// ★ 分镜组容器节点 — 液态玻璃分组框（纯视觉容器，不用 React Flow parentId）
+//    - 组内节点保持独立坐标，不受 parentId 约束
+//    - 拖动组时手动移动所有成员节点
+//    - 支持取消打组 / 批量下载 / 批量生成
+// ═══════════════════════════════════════════════════════
+function _GroupNode({ id, data, selected }: NodeProps) {
+  const { getNodes, setNodes } = useReactFlow();
+  const [isEditing, setIsEditing] = useState(false);
+  const [label, setLabel] = useState(data.label || '分镜组');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const memberIds: string[] = data.memberIds || [];
+
+  // ★ 取消打组：仅删除组容器节点，成员节点不变
+  const handleUngroup = useCallback(() => {
+    setNodes(nds => nds.filter(n => n.id !== id));
+  }, [id, setNodes]);
+
+  // ★ 批量下载组内所有节点的 resultUrl
+  const handleBatchDownload = useCallback(() => {
+    const allNodes = getNodes();
+    let count = 0;
+    memberIds.forEach(mid => {
+      const n = allNodes.find(nn => nn.id === mid);
+      const url = n?.data?.resultUrl || n?.data?.frameUrl || n?.data?.url;
+      if (url) { window.open(url, '_blank'); count++; }
+    });
+    if (count === 0) useAppStore.getState().setToastMsg('组内无可下载的图片');
+  }, [memberIds, getNodes]);
+
+  // ★ 批量生成组内 shot 节点
+  const handleBatchGenerate = useCallback(() => {
+    const allNodes = getNodes();
+    const shotIds = memberIds.filter(mid => {
+      const n = allNodes.find(nn => nn.id === mid);
+      return n?.type === 'shot' && n?.data?.firstFrameAnchor;
+    });
+    if (shotIds.length === 0) {
+      useAppStore.getState().setToastMsg('组内无可生成的分镜节点');
+      return;
+    }
+    window.dispatchEvent(new CustomEvent('canvas-batch-generate', { detail: { nodeIds: shotIds } }));
+    useAppStore.getState().setToastMsg(`已提交 ${shotIds.length} 个节点的生成任务`);
+  }, [memberIds, getNodes]);
+
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing]);
+
+  return (
+    <div 
+      className="relative w-full h-full rounded-2xl bg-[#0a0a0f]/20 border border-dashed border-white/[0.04]"
+      style={{ minWidth: '200px', minHeight: '120px' }}
+    >
+      {/* Top-left floating label — 可点击编辑 */}
+      <div 
+        className="absolute -top-3.5 left-4 px-2.5 py-0.5 rounded-lg bg-[#18181b]/90 backdrop-blur-xl border border-white/[0.06] shadow-[0_2px_12px_rgba(0,0,0,0.3)] z-10 nodrag"
+        onClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
+      >
+        {isEditing ? (
+          <input
+            ref={inputRef}
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            onBlur={() => { setIsEditing(false); data.label = label; }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { setIsEditing(false); data.label = label; } }}
+            className="bg-transparent text-[11px] text-zinc-300 outline-none w-20 nowheel"
+            autoFocus
+          />
+        ) : (
+          <span className="text-[11px] text-zinc-400 cursor-text select-none">{label}</span>
+        )}
+      </div>
+
+      {/* Top-right actions — 选中时可见 */}
+      {selected && (
+        <div className="absolute -top-3.5 right-4 flex items-center gap-1.5 z-10">
+          <button
+            onClick={(e) => { e.stopPropagation(); handleBatchGenerate(); }}
+            className="px-2 py-0.5 rounded-lg bg-[#18181b]/95 backdrop-blur-xl border border-white/[0.08] text-[10px] text-zinc-400 hover:text-emerald-400 hover:border-emerald-500/30 transition-all nodrag"
+          >
+            批量生成
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); handleBatchDownload(); }}
+            className="px-2 py-0.5 rounded-lg bg-[#18181b]/95 backdrop-blur-xl border border-white/[0.08] text-[10px] text-zinc-400 hover:text-white hover:border-white/20 transition-all nodrag"
+          >
+            批量下载
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); handleUngroup(); }}
+            className="px-2 py-0.5 rounded-lg bg-[#18181b]/95 backdrop-blur-xl border border-white/[0.08] text-[10px] text-zinc-400 hover:text-red-400 hover:border-red-500/30 transition-all nodrag"
+          >
+            取消打组
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+export const GroupNode = React.memo(_GroupNode);

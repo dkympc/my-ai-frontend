@@ -591,12 +591,10 @@ export default function LoginPage() {
 
       {/* ==================== Toast 通知 ==================== */}
       {toastMsg && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[99999] px-6 py-3 rounded-full animate-in slide-in-from-top-4 fade-in"
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[99999] px-6 py-3 rounded-full animate-in slide-in-from-top-4 fade-in flex items-center gap-2.5"
           style={{ background: 'linear-gradient(180deg, rgba(20,20,20,0.85), rgba(8,8,8,0.9))', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.06)', boxShadow: '0 20px 50px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.03)' }}>
-          <div className="flex items-center gap-3">
-            <AlertTriangle size={14} className="text-zinc-500" />
-            <span className="text-xs font-light text-zinc-300 tracking-wider">{toastMsg}</span>
-          </div>
+          <span className="w-1.5 h-1.5 rounded-full bg-white/30 shrink-0" />
+          <span className="text-xs font-light text-zinc-300 tracking-wider">{toastMsg}</span>
         </div>
       )}
 

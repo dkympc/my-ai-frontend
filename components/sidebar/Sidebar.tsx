@@ -121,7 +121,7 @@ export default function Sidebar({
     <>
       {activePopover && <div className="fixed inset-0 z-[90]" onClick={() => setActivePopover(null)} />}
 
-      <aside className="hidden md:flex w-[60px] flex-col items-center bg-black/40 backdrop-blur-3xl border-r border-white/5 flex-shrink-0 z-[100] relative py-5 shadow-[4px_0_24px_rgba(0,0,0,0.8)]">
+      <aside className="hidden md:flex w-[60px] flex-col items-center glass-panel border-r border-white/5 flex-shrink-0 z-[100] relative py-5">
         
         <div className="w-9 h-9 bg-gradient-to-b from-zinc-200 to-zinc-400 rounded-[14px] flex items-center justify-center shadow-[0_0_20px_rgba(255,255,255,0.2)] mb-8 cursor-pointer transition-all duration-500 hover:rotate-[15deg] hover:scale-110 border border-white/20" 
           onClick={() => { 

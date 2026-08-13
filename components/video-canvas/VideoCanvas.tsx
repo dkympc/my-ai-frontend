@@ -16,7 +16,7 @@ import {
     addEdge,
     useViewport,
     SelectionMode,
-    BaseEdge,             // ✨ 新增
+    useOnSelectionChange,
     EdgeLabelRenderer,    // ✨ 新增
     getBezierPath,        // ✨ 新增
     type Connection 
@@ -40,18 +40,18 @@ interface WorkspaceProps {
     videoHistory: VideoRecord[];
 }
   
-import { MediaNode, TextNode, RenderNode, CombineNode, MasterScriptNode, ShotNode, VideoClipNode, ScriptTableNode, AssetTableNode, PanoramaNode } from './CustomNodes';
+import { MediaNode, TextNode, RenderNode, CombineNode, MasterScriptNode, ShotNode, VideoClipNode, ScriptTableNode, AssetTableNode, PanoramaNode, GroupNode } from './CustomNodes';
 import { DirectorStageNode } from './DirectorStageNode';
-const nodeTypes = { media: MediaNode, text: TextNode, render: RenderNode, combine: CombineNode, masterScript: MasterScriptNode, shot: ShotNode, videoClip: VideoClipNode, scriptTable: ScriptTableNode, assetTable: AssetTableNode, panorama: PanoramaNode, directorStage: DirectorStageNode };
+const nodeTypes = { media: MediaNode, text: TextNode, render: RenderNode, combine: CombineNode, masterScript: MasterScriptNode, shot: ShotNode, videoClip: VideoClipNode, scriptTable: ScriptTableNode, assetTable: AssetTableNode, panorama: PanoramaNode, directorStage: DirectorStageNode, group: GroupNode };
 
-// ✨ 自定义可悬停删除的连线组件
+// ✨ 自定义可悬停删除的连线组件（含光流动画）
 function DeletableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, markerEnd }: any) {
   const { setEdges } = useReactFlow();
   const [edgePath, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
 
   return (
     <>
-      <BaseEdge path={edgePath} markerEnd={markerEnd} style={style} />
+      <path d={edgePath} className="react-flow__edge-path edge-flow-animated" style={style} markerEnd={markerEnd} />
       <EdgeLabelRenderer>
         <div style={{ position: 'absolute', transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`, pointerEvents: 'all' }} className="nodrag nopan group">
           <button
@@ -74,7 +74,7 @@ function ZoomPanel() {
   const { zoom } = useViewport();
 
   return (
-    <div className="absolute bottom-6 right-6 z-50 flex items-center gap-1 bg-black/40 backdrop-blur-3xl border border-white/10 rounded-[20px] shadow-[0_20px_40px_rgba(0,0,0,0.8)] p-1.5">
+    <div className="absolute bottom-6 right-6 z-50 flex items-center gap-1 glass-panel rounded-[20px] p-1.5">
       <button onClick={() => zoomOut({ duration: 300 })} className="p-2 text-zinc-500 hover:text-white hover:bg-white/10 rounded-xl transition-all">
         <ZoomOut size={16} />
       </button>
@@ -133,6 +133,144 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
   nodesRef.current = nodes;
   const edgesRef = useRef(edges);
   edgesRef.current = edges;
+
+  // ★ Alt + 拖拽复制节点：记录原节点位置 + 副本 ID
+  const dragCloneRef = useRef<{ originX: number; originY: number; nodeId: string; cloneId: string } | null>(null);
+
+  // ★ 分组拖动：记录组起始位置 + 成员列表
+  const groupDragRef = useRef<{ x: number; y: number; memberIds: string[] } | null>(null);
+
+  // ★ 框选打组：跟踪当前选中的节点
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+  useOnSelectionChange({
+    onChange: ({ nodes: selectedNodes }) => {
+      setSelectedNodeIds(selectedNodes.map(n => n.id));
+    },
+  });
+  // 兜底：直接从 nodes 数组计算选中数量（useOnSelectionChange 可能不触发）
+  const selectedCount = nodes.filter(n => n.selected).length;
+
+  // ★ 框选打组：将选中节点包裹到 GroupNode（纯视觉容器，不用 parentId）
+  const handleGroupSelected = useCallback(() => {
+    const currentNodes = getNodes();
+    const selectedNodes = currentNodes.filter(n => n.selected);
+    if (selectedNodes.length < 2) return;
+
+    // 计算包围盒
+    let gMinX = Infinity, gMinY = Infinity, gMaxX = -Infinity, gMaxY = -Infinity;
+    selectedNodes.forEach(n => {
+      const w = (n.measured?.width || n.style?.width as number) || 200;
+      const h = (n.measured?.height || n.style?.height as number) || 200;
+      if (n.position.x < gMinX) gMinX = n.position.x;
+      if (n.position.y < gMinY) gMinY = n.position.y;
+      if (n.position.x + w > gMaxX) gMaxX = n.position.x + w;
+      if (n.position.y + h > gMaxY) gMaxY = n.position.y + h;
+    });
+
+    const PAD_X = 80, PAD_TOP = 80, PAD_BOT = 60;
+    const groupId = `group_${Date.now()}`;
+    const memberIds = selectedNodes.map(n => n.id);
+
+    setNodes((nds: any[]) => [...nds, {
+      id: groupId,
+      type: 'group' as const,
+      position: { x: gMinX - PAD_X, y: gMinY - PAD_TOP },
+      style: { width: Math.max(gMaxX - gMinX + PAD_X * 2, 300), height: Math.max(gMaxY - gMinY + PAD_TOP + PAD_BOT, 200), zIndex: -1 },
+      data: { label: `分组 ${(nds.filter(n => n.type === 'group').length) + 1}`, memberIds },
+    }]);
+  }, [getNodes, setNodes]);
+
+  // ★ Alt + 拖拽复制：拖拽开始时立即创建副本，后续拖拽的是副本而非原节点
+  const onNodeDragStart = useCallback((_event: any, node: any) => {
+    // ★ 分组拖动：记录组起始位置
+    if (node.type === 'group' && node.data?.memberIds) {
+      groupDragRef.current = {
+        x: node.position.x,
+        y: node.position.y,
+        memberIds: node.data.memberIds,
+      };
+      return; // 组拖动不需要 Alt+clone 逻辑
+    }
+
+    if (!_event.altKey) return;
+
+    const newNodeId = `${node.type}_clone_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const clonedNode = {
+      ...node,
+      id: newNodeId,
+      position: { x: node.position.x, y: node.position.y },
+      selected: false,
+      data: JSON.parse(JSON.stringify(node.data)),
+    };
+
+    dragCloneRef.current = {
+      originX: node.position.x,
+      originY: node.position.y,
+      nodeId: node.id,
+      cloneId: newNodeId,
+    };
+
+    // 立即把副本加入画布（此时副本与原节点重叠）
+    setNodes((nds: any[]) => [...nds, clonedNode]);
+  }, [setNodes]);
+
+  // ★ 拖拽过程中：组拖动实时联动成员 / Alt复制锁定原节点
+  const onNodeDrag = useCallback((_event: any, node: any) => {
+    // ★ 分组拖动中：实时移动所有成员节点
+    if (groupDragRef.current && node.type === 'group') {
+      const dx = node.position.x - groupDragRef.current.x;
+      const dy = node.position.y - groupDragRef.current.y;
+      if (dx === 0 && dy === 0) return;
+
+      // 更新基准位置，下次拖动帧计算增量
+      groupDragRef.current.x = node.position.x;
+      groupDragRef.current.y = node.position.y;
+
+      const memberIds = groupDragRef.current.memberIds;
+      setNodes((nds: any[]) => nds.map(n => {
+        if (memberIds.includes(n.id)) {
+          return { ...n, position: { x: n.position.x + dx, y: n.position.y + dy } };
+        }
+        return n;
+      }));
+      return;
+    }
+
+    if (!dragCloneRef.current) return;
+    const { originX, originY, nodeId, cloneId } = dragCloneRef.current;
+
+    setNodes((nds: any[]) => nds.map((n: any) => {
+      if (n.id === nodeId) {
+        // 原节点锁死在初始位置
+        return { ...n, position: { x: originX, y: originY } };
+      }
+      if (n.id === cloneId) {
+        // 副本跟随当前拖拽位置
+        return { ...n, position: { x: node.position.x, y: node.position.y } };
+      }
+      return n;
+    }));
+  }, [setNodes]);
+
+  // ★ 拖拽结束：清理追踪状态
+  const onNodeDragStop = useCallback((_event: any, node: any) => {
+    // ★ 分组拖动结束：仅清理 ref（实时移动已在 onNodeDrag 完成）
+    if (groupDragRef.current && node.type === 'group') {
+      groupDragRef.current = null;
+      return;
+    }
+
+    if (!dragCloneRef.current) return;
+    const { originX, originY, nodeId } = dragCloneRef.current;
+    dragCloneRef.current = null;
+
+    // 确保原节点归位（兜底）
+    setNodes((nds: any[]) => nds.map((n: any) =>
+      n.id === nodeId ? { ...n, position: { x: originX, y: originY } } : n
+    ));
+
+    useAppStore.getState().setToastMsg(`已复制节点`);
+  }, [setNodes]);
 
   // ★ 性能优化：连线视觉指纹缓存——仅当节点选中/生成/脏数据/书签状态变化时重算连线样式，跳过纯拖拽位置更新
   const lastEdgeVisualHashRef = useRef<string>('');
@@ -269,10 +407,14 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
       const handleKeyDown = (e: KeyboardEvent) => {
         // 保护机制：如果焦点在输入框里，不要触发画布的快捷键，保留浏览器打字默认逻辑
         if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-  
+
+        // ★ 保护机制：如果用户正在页面上选中文字（如预览气泡、剧本显示区等），交给浏览器原生复制，不拦截
+        const domSelection = window.getSelection();
+        if (domSelection && domSelection.toString().trim().length > 0) return;
+   
         const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
         const isCmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
-  
+   
         // Ctrl + C 复制
         if (isCmdOrCtrl && e.key.toLowerCase() === 'c') {
            const selectedNodes = getNodes().filter(n => n.selected);
@@ -802,7 +944,7 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
       {/* ========================================== */}
       {typeof window !== 'undefined' && createPortal(
         <div 
-          className={`fixed top-24 left-[84px] bottom-24 w-[360px] z-[999999] rounded-[32px] bg-[#050507]/90 backdrop-blur-3xl border border-white/[0.08] shadow-[0_30px_100px_rgba(0,0,0,0.95),inset_0_1px_1px_rgba(255,255,255,0.08)] flex flex-col overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+          className={`fixed top-24 left-[84px] bottom-24 w-[360px] z-[999999] rounded-[32px] glass-panel-deep flex flex-col overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] ${
             isFilmControlOpen ? 'opacity-100 translate-x-0 pointer-events-auto' : 'opacity-0 -translate-x-12 pointer-events-none'
           }`}
           onClick={e => e.stopPropagation()}
@@ -1082,7 +1224,8 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
         
         onNodesDelete={onNodesDelete} onEdgesDelete={onEdgesDelete} 
         
-        onConnectStart={onConnectStart} onConnectEnd={onConnectEnd} 
+        onConnectStart={onConnectStart} onConnectEnd={onConnectEnd}
+        onNodeDragStart={onNodeDragStart} onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop}
         nodeTypes={nodeTypes} edgeTypes={edgeTypes} onPaneDoubleClick={onPaneDoubleClick} onPaneContextMenu={onPaneContextMenu} onPaneClick={() => setMenuPos(null)}
   zoomOnDoubleClick={false} minZoom={0.05} maxZoom={15} proOptions={{ hideAttribution: true }} 
   connectionRadius={80}
@@ -1092,7 +1235,7 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
   selectionStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.02)', border: '1px dashed rgba(255, 255, 255, 0.2)', backdropFilter: 'blur(4px)' }}
   panOnScroll={true} zoomOnScroll={false}
 >
-        <Background color="rgba(255, 255, 255, 0.15)" variant={BackgroundVariant.Dots} gap={24} size={1.5} />
+        <Background color="rgba(255, 255, 255, 0.06)" variant={BackgroundVariant.Dots} gap={24} size={1.5} />
         
         {/* 🚀 核心修复：平时半透明+缩小到 60%，鼠标悬停时丝滑放大恢复 */}
         <MiniMap 
@@ -1110,6 +1253,21 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
 
         <Controls showInteractive={false} showZoom={false} showFitView={false} className="hidden" />
         <ZoomPanel />
+
+        {/* ★ 框选打组浮动工具栏 — 选中 ≥2 个节点时显示 */}
+        {selectedCount >= 2 && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 glass-panel rounded-[16px] px-3 py-2 animate-in fade-in slide-in-from-top-2 duration-200">
+            <span className="text-[11px] text-zinc-400 mr-1">已选 {selectedCount} 个节点</span>
+            <div className="w-px h-4 bg-white/[0.08]" />
+            <button
+              onClick={handleGroupSelected}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-[10px] bg-white/[0.06] border border-white/[0.08] text-[11px] text-zinc-300 hover:text-white hover:bg-white/[0.1] hover:border-white/[0.15] transition-all"
+            >
+              <Layers size={12} />
+              打组
+            </button>
+          </div>
+        )}
       </ReactFlow>
 
       {/* 左上角：原位极简编辑框 + 保存指示灯（返回按钮已上移至 WorkspaceApp 层级，确保加载时始终可见） */}

@@ -69,7 +69,7 @@ export default function CanvasVault() {
             <div 
               key={proj.id}
               onClick={() => setActiveCanvasProjectId(proj.id)}
-              className="group relative h-56 cursor-pointer rounded-[24px] overflow-hidden transition-all duration-500 hover:-translate-y-2 bg-black/40 backdrop-blur-xl border border-white/[0.05] hover:border-white/[0.15] shadow-[0_10px_40px_rgba(0,0,0,0.5)] flex flex-col"
+              className="group relative h-56 cursor-pointer rounded-[24px] overflow-hidden transition-all duration-500 hover:-translate-y-2 glass-panel flex flex-col"
             >
               <div className="flex-1 bg-[#0a0a0a] relative overflow-hidden flex items-center justify-center border-b border-white/[0.02]">
                 <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_2px_2px,rgba(255,255,255,0.15)_1px,transparent_0)] bg-[size:20px_20px]" />
