@@ -2342,40 +2342,36 @@ ${dialogueCtx}
                   </button>
                 </div>
 
-                {/* 操作按钮 */}
-                <div className="flex items-center justify-between mt-2 shrink-0">
-                  <button
-                    onClick={() => { setSd30sMode(false); setDialogueOpen(false); setDialogueMessages([]); setPreviewReady(false); }}
-                    className="px-3 py-1 rounded-[8px] text-[11px] text-zinc-500 hover:text-white hover:bg-white/[0.05] transition-all"
-                  >
-                    放弃
-                  </button>
-                  <button
-                    disabled={dialogueLoading}
-                    onClick={() => {
-                      if (dialogueLoading) return;
-                      if (sd30sMode) {
-                        // 长镜头30s模式：直接调用 handleSD30sConfirm
-                        handleSD30sConfirm();
-                      } else {
-                        // 通用分镜模式：原逻辑
-                        const dialogueContext = dialogueMessages.map(m => `[${m.role}]: ${m.content}`).join('\n');
-                        if (!dialogueContext) {
-                          useAppStore.getState().setToastMsg('预览对话为空，请先完成分镜预览');
-                          return;
-                        }
-                        handleFissionShots(dialogueContext);
-                      }
-                    }}
-                    className={`px-3 py-1 rounded-[8px] text-[11px] font-medium transition-all ${
-                      dialogueLoading
-                        ? 'bg-white/[0.04] border border-white/[0.06] text-zinc-500 cursor-not-allowed'
-                        : 'bg-white/[0.1] border border-white/[0.15] text-white hover:bg-white/[0.15] cursor-pointer'
-                    }`}
-                  >
-                    {sd30sMode ? '确认并生成30s节点 →' : '确认并生成分镜 →'}
-                  </button>
-                </div>
+                {/* ★ 浮动确认覆盖层：AI 回复完成后显示，不阻塞对话 */}
+                {previewReady && !dialogueLoading && (
+                  <div className="shrink-0 mt-2 px-3 py-2 bg-emerald-500/[0.08] border border-emerald-500/20 rounded-xl">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-emerald-400/90 truncate">分镜方案已就绪，确认后执行生成</span>
+                      <div className="flex gap-1.5 shrink-0">
+                        <button onClick={() => setPreviewReady(false)}
+                          className="text-[10px] px-2 py-1 rounded-lg text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.08] transition-all">
+                          忽略
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (sd30sMode) {
+                              handleSD30sConfirm();
+                            } else {
+                              const dialogueContext = dialogueMessages.map(m => `[${m.role}]: ${m.content}`).join('\n');
+                              if (!dialogueContext) {
+                                useAppStore.getState().setToastMsg('预览对话为空，请先完成分镜预览');
+                                return;
+                              }
+                              handleFissionShots(dialogueContext);
+                            }
+                          }}
+                          className="text-[10px] px-2 py-1 rounded-lg text-emerald-400 hover:text-emerald-300 bg-emerald-500/[0.15] hover:bg-emerald-500/[0.25] transition-all">
+                          确认生成 →
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

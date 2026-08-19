@@ -226,6 +226,9 @@ const _SD30sNode = ({ id, data, selected }: SD30sNodeProps) => {
   const [chatMessages, setChatMessages] = useState<{ role: string; content: string }[]>((data as any)._chatMessages || []);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
+  // ★ 待确认的修改（对话助手回复中的 !update 指令暂存，不立即执行）
+  const [pendingUpdates, setPendingUpdates] = useState<Record<string, string> | null>(null);
+  const [pendingDesc, setPendingDesc] = useState('');
   // 持久化对话记录到 node.data
   const saveChatMessages = useCallback((messages: { role: string; content: string }[]) => {
     setChatMessages(messages);
@@ -439,6 +442,9 @@ const _SD30sNode = ({ id, data, selected }: SD30sNodeProps) => {
   const handleChatSend = useCallback(async () => {
     const msg = chatInput.trim();
     if (!msg || chatLoading) return;
+    // ★ 用户发了新消息 → 清除之前的待确认修改（旧建议作废）
+    setPendingUpdates(null);
+    setPendingDesc('');
     saveChatMessages([...chatMessages, { role: 'user', content: msg }]);
     setChatInput('');
     setChatLoading(true);
@@ -462,6 +468,7 @@ const _SD30sNode = ({ id, data, selected }: SD30sNodeProps) => {
         '一次可以输出多个 !update 指令。',
         '不要修改用户没有要求修改的框。',
         '不要修改剧本选中片段。',
+        '★ 修改必须在原文内容基础上进行调整，不能丢弃或大量缩减原文已有的内容。保持原文的完整性和细节。',
       ].join('\n');
 
       const response = await fetchApi('/v1/chat/completions', {
@@ -481,20 +488,22 @@ const _SD30sNode = ({ id, data, selected }: SD30sNodeProps) => {
       const updatedMessages = [...chatMessages, { role: 'assistant', content: reply }];
       saveChatMessages(updatedMessages);
 
-      // 解析 !update 指令
+      // 解析 !update 指令（暂存待确认，不立即执行）
       const updateRegex = /!update\s+(topdown|emotion|perform)\s+([\s\S]*?)(?=!update|$)/g;
       let match;
       const updatedFields: Record<string, string> = {};
       while ((match = updateRegex.exec(reply)) !== null) {
         const target = match[1];
         const newContent = match[2].trim();
-        if (target === 'topdown') { setTopDownEditable(newContent); updatedFields._topDownText = newContent; }
-        else if (target === 'emotion') { setEmotionEditable(newContent); setEmotionText(newContent); updatedFields._emotionText = newContent; }
-        else if (target === 'perform') { setEditablePerform(newContent); setPerformText(newContent); updatedFields._performText = newContent; }
+        if (target === 'topdown') { updatedFields._topDownText = newContent; }
+        else if (target === 'emotion') { updatedFields._emotionText = newContent; }
+        else if (target === 'perform') { updatedFields._performText = newContent; }
       }
-      // ★ 持久化：将修改内容同步到 node.data，防止崩溃丢失
+      // ★ 暂存到 pending，等待用户确认
       if (Object.keys(updatedFields).length > 0) {
-        saveToNodeData(updatedFields);
+        const fieldNames = Object.keys(updatedFields).map(k => ({ '_topDownText': '定场图', '_emotionText': '情绪分析', '_performText': '表演提示词' }[k] || k)).join('、');
+        setPendingUpdates(updatedFields);
+        setPendingDesc(`检测到对【${fieldNames}】的修改建议，请确认是否应用`);
       }
     } catch (error: any) {
       console.error("[SD30s Chat Error] - 原因是：", error?.message || error);
@@ -703,7 +712,7 @@ const _SD30sNode = ({ id, data, selected }: SD30sNodeProps) => {
             <span className={`text-[11px] ${emotionExpanded ? 'text-white' : 'text-zinc-600'}`}>情绪分析</span>
             <span className="text-zinc-700">→</span>
             <span className={`text-[11px] ${performExpanded ? 'text-white' : 'text-zinc-600'}`}>表演生成</span>
-            <button onClick={() => setChatOpen(true)}
+            <button onClick={() => setChatOpen(!chatOpen)}
               className={`flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg transition-all ml-2 ${chatOpen ? 'text-white bg-white/10' : 'text-zinc-400 hover:text-white bg-white/[0.06] hover:bg-white/[0.1]'}`}>
               <MessageSquare size={13} /> 创作助手
             </button>
@@ -986,6 +995,35 @@ const _SD30sNode = ({ id, data, selected }: SD30sNodeProps) => {
               </div>
             )}
           </div>
+          {/* ★ 待确认修改覆盖层：不阻塞对话，用户可点可不点 */}
+          {pendingUpdates && (
+            <div className="shrink-0 mx-4 mb-2 px-3 py-2 bg-emerald-500/[0.08] border border-emerald-500/20 rounded-xl">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] text-emerald-400/90 truncate">{pendingDesc}</span>
+                <div className="flex gap-1.5 shrink-0">
+                  <button onClick={() => { setPendingUpdates(null); setPendingDesc(''); }}
+                    className="text-[10px] px-2 py-1 rounded-lg text-zinc-500 hover:text-zinc-300 bg-white/[0.04] hover:bg-white/[0.08] transition-all">
+                    忽略
+                  </button>
+                  <button onClick={() => {
+                    if (pendingUpdates) {
+                      const updates = pendingUpdates;
+                      if (updates._topDownText) { setTopDownEditable(updates._topDownText); }
+                      if (updates._emotionText) { setEmotionEditable(updates._emotionText); setEmotionText(updates._emotionText); }
+                      if (updates._performText) { setEditablePerform(updates._performText); setPerformText(updates._performText); }
+                      saveToNodeData(updates);
+                      setPendingUpdates(null);
+                      setPendingDesc('');
+                      useAppStore.getState().setToastMsg('✅ 已应用修改');
+                    }
+                  }}
+                    className="text-[10px] px-2 py-1 rounded-lg text-emerald-400 hover:text-emerald-300 bg-emerald-500/[0.15] hover:bg-emerald-500/[0.25] transition-all">
+                    确认应用
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="px-4 py-3 border-t border-white/[0.06] shrink-0">
             <div className="flex gap-2">
               <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)}
