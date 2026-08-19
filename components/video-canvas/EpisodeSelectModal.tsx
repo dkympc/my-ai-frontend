@@ -88,7 +88,7 @@ export default function EpisodeSelectModal({
         const token = localStorage.getItem("yr-ai-token");
         if (!token) throw new Error("[Episode Detect Error] 未登录，请先登录");
 
-        const detectModel = useAppStore.getState().canvasSettings?.defaultLLMModel || "deepseek-v4-pro";
+        const detectModel = useAppStore.getState().canvasSettings?.defaultLLMModel || 'deepseek-v4-flash';
 
         const response = await fetchApi("/v1/chat/completions", {
           method: "POST",

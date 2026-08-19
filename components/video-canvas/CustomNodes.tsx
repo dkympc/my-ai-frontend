@@ -34,14 +34,14 @@ function useMediaDimensions(url?: string) {
 }
 
 // ★ 画布 LLM 模型白名单（与 constants.tsx MODELS 同步，用于过滤掉生图/生视频模型）
-const LLM_MODEL_IDS = ['deepseek-v4-pro', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gemini-3.1-pro-preview', 'gemini-3.5-flash', 'gemini-3.6-flash', 'kimi-k2.6', 'claude-haiku-4-5-20251001-thinking'];
+const LLM_MODEL_IDS = ['deepseek-v4-flash', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gemini-3.1-pro-preview', 'gemini-3.5-flash', 'gemini-3.6-flash', 'kimi-k2.6', 'claude-haiku-4-5-20251001-thinking'];
 
 // ★ 统一 LLM 模型解析：① 中控台全局默认（优先）→ ② 节点自选模型 → ③ 硬兜底
 const resolveLLMModel = (data: any): string => {
   const globalModel = useAppStore.getState().canvasSettings?.defaultLLMModel;
   if (globalModel && LLM_MODEL_IDS.includes(globalModel)) return globalModel;
   if (data.model && LLM_MODEL_IDS.includes(data.model)) return data.model;
-  return 'deepseek-v4-pro';
+  return 'deepseek-v4-flash';
 };
 
 // ✨ 放在 CustomNodes.tsx 文件顶部 imports 区域下方
@@ -534,6 +534,7 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
   const [episodeSelectAssetType, setEpisodeSelectAssetType] = useState<'scene' | 'character' | 'prop'>('scene'); // ★ 资产表提取类型
   const [cachedEpisodesForModal, setCachedEpisodesForModal] = useState<any[] | null>(null); // ★ 缓存命中时传给弹窗
   const [dialogueOpen, setDialogueOpen] = useState(false); // ★ 分镜对话面板展开/收起
+  const [sd30sMode, setSd30sMode] = useState(false); // ★ 是否为长镜头30s对话模式
   const [dialogueMessages, setDialogueMessages] = useState<{role: string; content: string}[]>([]); // ★ 对话消息列表
   const [dialogueLoading, setDialogueLoading] = useState(false); // ★ 对话LLM请求中
   const [dialogueInput, setDialogueInput] = useState(''); // ★ 对话输入框
@@ -573,10 +574,11 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
         body: JSON.stringify({
           model: targetModel,
           prompt_type: 'fission-preview',
-          params: {},  // 预览无动态参数
+          params: {},
           user_content: userContent,
           stream: true,
         }),
+        useApiRoute: true, // ★ 走 Next.js API Route，绕开代理缓冲
       });
 
       if (!response.ok) {
@@ -713,7 +715,7 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
       const payload = {
         model: targetModel,
         max_tokens: 4096,
-        ...(targetModel === 'deepseek-v4-pro' ? { thinking: { type: "disabled" } } : {}),
+        ...(targetModel === 'deepseek-v4-flash' ? { thinking: { type: "disabled" } } : {}),
         prompt_type: "camera-extract",
         params: { GLOBAL_STYLE: globalStyle },
         user_content: `剧本内容：\n${data.text}`
@@ -1086,7 +1088,7 @@ const _MasterScriptNode = ({ id, data, selected }: any) => {
         model: targetModel,
         // ★ DeepSeek V4 Pro：分镜属于长链路推理任务，优先走 max 思考强度
         // 这里不再强行关闭 thinking，避免把模型压回普通输出路径，导致 stage1 卡在半截 JSON
-        ...(targetModel === 'deepseek-v4-pro' ? { thinking: { type: "disabled" }, max_tokens: 65536 } : {}),
+        ...(targetModel === 'deepseek-v4-flash' ? { thinking: { type: "disabled" }, max_tokens: 65536 } : {}),
         // ★ GPT-5.4 系列：temperature 对该系列非法（推理模型不支持），仅设 reasoning_effort 控制推理深度
         // mini: low（防分镜过碎）  nano: medium（low 下会吞内容，只出一个镜）
         ...(targetModel === 'gpt-5.4-mini' ? { reasoning_effort: "low" } : targetModel === 'gpt-5.4-nano' ? { reasoning_effort: "medium" } : {}),
@@ -1298,7 +1300,7 @@ ${dialogueCtx}
         const payloadStage2 = {
           model: targetModel,
         // ★ DeepSeek V4 Pro：第二阶段也沿用 max 思考强度，保持与 stage1 同一条稳定链路
-        ...(targetModel === 'deepseek-v4-pro' ? { thinking: { type: "disabled" }, max_tokens: 32768 } : {}),
+        ...(targetModel === 'deepseek-v4-flash' ? { thinking: { type: "disabled" }, max_tokens: 65536 } : {}),
         ...(targetModel === 'gpt-5.4-mini' ? { reasoning_effort: "low" } : targetModel === 'gpt-5.4-nano' ? { reasoning_effort: "medium" } : {}),
         ...(['kimi-k2.6'].includes(targetModel) ? { thinking: { type: "enabled", budget_tokens: 32000 }, temperature: 0.3 } : {}),
         prompt_type: "fission-stage2",
@@ -1637,7 +1639,269 @@ ${dialogueCtx}
       updateNodeData(id, { isGenerating: false });
     }
   };
-        
+
+  // 🎭 SD2.5 30s 表演 — 创建 SD30sNode（内联对话模式）
+  const handleSD30sFission = () => {
+    const ta = textareaRef.current;
+    const realSelectedText = ta ? ta.value.substring(ta.selectionStart, ta.selectionEnd) : selectedText;
+    console.log('[SD30s Debug] handleSD30sFission called, selectedText length:', realSelectedText?.length);
+    if (!realSelectedText) {
+      useAppStore.getState().setToastMsg('⚠️ 请先在剧本中框选要拆分的段落');
+      return;
+    }
+    // 打开对话模式（复用 dialogueOpen，但标记为 sd30s 模式）
+    setSd30sMode(true);
+    setDialogueOpen(true);
+    setDialogueMessages([]);
+    setPreviewReady(false);
+    sendSD30sPreviewToLLM(undefined, true);
+  };
+
+  // ★ 发送长镜头30s分段估算请求（全程 fission-preview 流式对话，和通用分镜完全一样）
+  const sendSD30sPreviewToLLM = async (userMessage?: string, reset?: boolean) => {
+    const ta = textareaRef.current;
+    const realSelectedText = ta ? ta.value.substring(ta.selectionStart, ta.selectionEnd) : selectedText;
+    console.log('[SD30s Debug] sendSD30sPreviewToLLM called, userMessage:', userMessage, 'reset:', reset, 'text length:', realSelectedText?.length);
+    if (!realSelectedText && !userMessage) return;
+    setDialogueLoading(true);
+    setPreviewReady(false);
+
+    const targetModel = resolveLLMModel(data);
+    const fullText = ta?.value || data.text || '';
+    console.log('[SD30s Debug] model:', targetModel, 'fullText length:', fullText.length);
+
+    const baseMessages = reset ? [] : dialogueMessages;
+    const displayUserMsg = userMessage || '请分析我框选的剧本段落，给出30s的分镜方案';
+    const newMessages = [...baseMessages, { role: 'user', content: displayUserMsg }];
+    setDialogueMessages(newMessages);
+
+    // ★ 使用 sd2.5-30s-preview 提示词（基于 drama-emotion-30s.md v4 规则，替代 fission-preview）
+    let userContent = '';
+    if (baseMessages.length === 0) {
+      // 首次请求：发送剧本全文 + 选中片段，系统 prompt 已包含全部 30s 规则
+      userContent = fullText
+        ? `【剧本全文】\n${fullText}\n\n【本次需拆解的选中片段】\n${realSelectedText}`
+        : `【本次需拆解的选中片段】\n${realSelectedText}`;
+    } else {
+      // 后续轮次：发送对话历史 + 用户最新消息
+      const historyStr = baseMessages
+        .map(m => `[${m.role === 'user' ? '用户' : 'AI'}]: ${m.content}`)
+        .join('\n\n');
+      userContent = `【当前剧本选段】\n${realSelectedText}\n\n【对话历史】\n${historyStr}\n\n【用户最新消息】\n${userMessage || displayUserMsg}`;
+    }
+
+    try {
+      console.log('[SD30s Debug] sending request, userContent length:', userContent.length);
+      // ★ 使用 30s 专属预览 prompt，基于 drama-emotion-30s.md v4 规则
+      const sd30sPayload: any = {
+        model: targetModel,
+        prompt_type: 'sd2.5-30s-preview',
+        params: {},
+        user_content: userContent,
+        stream: true,
+      };
+      if (targetModel && targetModel.includes('deepseek')) {
+        sd30sPayload.thinking = { type: 'disabled' };
+      }
+      const response = await fetchApi('/v1/canvas/prompt', {
+        method: 'POST',
+        body: JSON.stringify(sd30sPayload),
+        useApiRoute: true, // ★ 走 Next.js API Route，绕开代理缓冲
+      });
+
+      console.log('[SD30s Debug] response status:', response.status, response.statusText);
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        console.error('[SD30s Debug] HTTP error:', response.status, errText.substring(0, 500));
+        throw new Error(`HTTP ${response.status}: ${errText}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        console.error('[SD30s Debug] no reader - response.body is null');
+        throw new Error('无法读取响应流');
+      }
+
+      const decoder = new TextDecoder();
+      let aiContent = '';
+      let buffer = '';
+      let chunkCount = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          console.log('[SD30s Debug] stream done, total chunks:', chunkCount, 'total content length:', aiContent.length);
+          break;
+        }
+        chunkCount++;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data:')) continue;
+          const jsonStr = trimmed.slice(5).trim();
+          if (jsonStr === '[DONE]') continue;
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const delta = parsed.choices?.[0]?.delta?.content || '';
+            if (delta) {
+              if (aiContent.length === 0) console.log('[SD30s Debug] first content chunk received, delta length:', delta.length);
+              aiContent += delta;
+              setDialogueMessages([...newMessages, { role: 'assistant', content: aiContent }]);
+            }
+          } catch (e) {
+            console.warn('[SD30s Debug] SSE parse error for line:', jsonStr.substring(0, 100));
+          }
+        }
+      }
+
+      if (aiContent) {
+        console.log('[SD30s Debug] preview ready, total:', aiContent.length);
+        setPreviewReady(true);
+      } else {
+        console.warn('[SD30s Debug] stream completed but no content received');
+      }
+    } catch (err: any) {
+      console.error('[SD30s Debug] error:', err?.message || err);
+      setDialogueMessages([...newMessages, { role: 'assistant', content: `抱歉，请求失败: ${err.message || '未知错误'}` }]);
+    } finally {
+      setDialogueLoading(false);
+    }
+  };
+
+  /** 解析 LLM 输出的【确认分段】格式，返回段标签+内容数组 */
+  function parseSD30sSegments(text: string): { label: string; content: string }[] {
+    if (!text.includes('【确认分段】')) return [];
+    const segments: { label: string; content: string }[] = [];
+    // 用 matchAll 一次性收集所有 ===段N=== 块，避免嵌套 exec 的跳过 Bug
+    const blockRegex = /===段(\d+)===\s*标签[：:]\s*(.+?)[\r\n]+\s*内容[：:]\s*([\s\S]*?)(?=\n===段|\n*$)/g;
+    const matches = text.matchAll(blockRegex);
+    for (const match of matches) {
+      segments.push({ label: match[2].trim(), content: match[3].trim() });
+    }
+    return segments;
+  }
+
+  // ★ 长镜头30s确认后创建 SD30sNode（支持多段解析）
+  const handleSD30sConfirm = useCallback(async () => {
+    const ta = textareaRef.current;
+    const realSelectedText = ta ? ta.value.substring(ta.selectionStart, ta.selectionEnd) : selectedText;
+    if (!realSelectedText) {
+      useAppStore.getState().setToastMsg('⚠️ 请先在剧本中框选要拆分的段落');
+      return;
+    }
+    const fullText = ta?.value || data.text || '';
+    const thisNode = getNodes().find(n => n.id === id);
+    if (!thisNode) return;
+
+    // 先从已有对话中尝试解析分段（如果 LLM 已输出【确认分段】格式）
+    const lastAiMsg = dialogueMessages.filter(m => m.role === 'assistant').pop();
+    let segments = parseSD30sSegments(lastAiMsg?.content || '');
+
+    // 如果未解析到分段，发送一次最终确认请求让 LLM 输出结构化格式
+    if (segments.length === 0) {
+      setDialogueLoading(true);
+      try {
+        const historyStr = dialogueMessages
+          .map(m => `[${m.role === 'user' ? '用户' : 'AI'}]: ${m.content}`)
+          .join('\n\n');
+        const confirmPayload = {
+          model: resolveLLMModel(data),
+          prompt_type: 'sd2.5-30s-preview',
+          params: {},
+          user_content: `【当前剧本选段】\n${realSelectedText}\n\n【对话历史】\n${historyStr}\n\n【用户最新消息】\n确认，请严格按照【确认分段】格式输出分段结果`,
+          stream: false,
+        };
+        if (resolveLLMModel(data).includes('deepseek')) {
+          (confirmPayload as any).thinking = { type: 'disabled' };
+        }
+        const resp = await fetchApi('/v1/canvas/prompt', {
+          method: 'POST',
+          body: JSON.stringify(confirmPayload),
+        });
+        const respData = await resp.json();
+        const aiReply = respData?.choices?.[0]?.message?.content || '';
+        segments = parseSD30sSegments(aiReply);
+      } catch (err: any) {
+        console.error('[SD30s Confirm Error] - 原因是：', err?.message || err);
+      } finally {
+        setDialogueLoading(false);
+      }
+    }
+
+    // 记录预览对话中的最后一段方案摘要，透传给各节点
+    const dialogueContext = lastAiMsg?.content?.substring(0, 2000) || '';
+
+    if (segments.length > 1) {
+      // 多段：每段创建一个节点
+      const newNodes: any[] = [];
+      const newEdges: any[] = [];
+      segments.forEach((seg, idx) => {
+        const nodeId = `sd30s_${Date.now()}_${idx}`;
+        newNodes.push({
+          id: nodeId,
+          type: 'sd30s',
+          position: { x: thisNode.position.x + 880 + idx * 40, y: thisNode.position.y + idx * 320 },
+          data: {
+            type: 'sd30s' as const,
+            title: `30s · ${seg.label || seg.content.substring(0, 16)}`,
+            sceneLabel: seg.label || '',
+            status: 'planning' as const,
+            selectedText: seg.content || realSelectedText,
+            fullText: fullText,
+            dialogueContext: dialogueContext, // ★ 预览方案摘要透传
+          },
+        });
+        newEdges.push({
+          id: `e-${id}-${nodeId}`,
+          source: id,
+          target: nodeId,
+          sourceHandle: 'right',
+          targetHandle: 'left',
+          style: { stroke: '#71717a', strokeWidth: 2 },
+        });
+      });
+      setNodes((nds: any) => [...nds, ...newNodes]);
+      setEdges((eds: any) => [...eds, ...newEdges]);
+      useAppStore.getState().setToastMsg(`🎭 已创建 ${segments.length} 个长镜头 30s 节点`);
+    } else {
+      // 单段（或解析失败）：创建单个节点，内容为整段选中文本
+      const sd30sId = `sd30s_${Date.now()}`;
+      const newNode = {
+        id: sd30sId,
+        type: 'sd30s',
+        position: { x: thisNode.position.x + 880, y: thisNode.position.y },
+        data: {
+          type: 'sd30s' as const,
+          title: `长镜头 30s · ${realSelectedText.substring(0, 20)}${realSelectedText.length > 20 ? '...' : ''}`,
+          sceneLabel: '',
+          status: 'planning' as const,
+          selectedText: realSelectedText,
+          fullText: fullText,
+          dialogueContext: dialogueContext, // ★ 预览方案摘要透传
+        },
+      };
+      const newEdge = {
+        id: `e-${id}-${sd30sId}`,
+        source: id,
+        target: sd30sId,
+        sourceHandle: 'right',
+        targetHandle: 'left',
+        style: { stroke: '#71717a', strokeWidth: 2 },
+      };
+      setNodes((nds: any) => [...nds, newNode]);
+      setEdges((eds: any) => [...eds, newEdge]);
+      useAppStore.getState().setToastMsg('🎭 已创建 1 个长镜头 30s 节点');
+    }
+
+    // 关闭对话面板
+    setSd30sMode(false);
+    setDialogueOpen(false);
+    setDialogueMessages([]);
+    setPreviewReady(false);
+  }, [id, selectedText, getNodes, setNodes, setEdges, dialogueMessages, data]);
 
   const handleFissionTable = async () => {
     if (data.isGenerating || !selectedText) return;
@@ -1918,6 +2182,7 @@ ${dialogueCtx}
                   useAppStore.getState().setToastMsg('请先在剧本中框选要拆分的段落');
                   return;
                 }
+                setSd30sMode(false); // 切换到通用分镜模式
                 setDialogueOpen(true);
                 setDialogueMessages([]);
                 setPreviewReady(false);
@@ -1937,6 +2202,30 @@ ${dialogueCtx}
               </div>
             </div>
 
+            {/* ★ 长镜头 30s 方法卡片（已实现） */}
+            <div
+              onClick={() => {
+                if (dialogueLoading) return;
+                if (!selectedText) {
+                  useAppStore.getState().setToastMsg('请先在剧本中框选要拆分的段落');
+                  return;
+                }
+                handleSD30sFission();
+              }}
+              className={`method-card method-card-active nodrag cursor-pointer mb-4 ${!selectedText ? 'opacity-50' : ''}`}
+            >
+              <div className="flex items-center gap-2.5 mb-2">
+                <div className="w-7 h-7 rounded-[8px] bg-white/[0.08] border border-white/[0.1] flex items-center justify-center">
+                  <Film size={14} className="text-zinc-200" />
+                </div>
+                <span className="text-[13px] font-bold text-white tracking-wider">长镜头 30s - seedance 2.5</span>
+                <span className="ml-auto w-1.5 h-1.5 rounded-full bg-white/50" />
+              </div>
+              <div className="text-[11px] text-zinc-400 leading-relaxed">
+                {selectedText ? `已选 ${selectedText.length} 字 · 点击执行` : '框选剧本后点击执行'}
+              </div>
+            </div>
+
             {/* ★ 分割线 */}
             <div className="flex items-center gap-2 mb-3 shrink-0">
               <div className="flex-1 h-px bg-white/[0.04]" />
@@ -1948,7 +2237,6 @@ ${dialogueCtx}
             <div className="flex flex-col gap-0.5 shrink-0">
               {([
                 { key: 'long15s' as const, Icon: Film, label: '长镜头 15s' },
-                { key: 'long30s' as const, Icon: Film, label: '长镜头 30s' },
                 { key: 'table' as const, Icon: Table, label: '表格分镜' },
               ]).map(m => (
                 <div
@@ -1993,10 +2281,10 @@ ${dialogueCtx}
                 {/* 预览头部 */}
                 <div className="flex items-center justify-between mb-2 shrink-0">
                   <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
-                    分镜预览{dialogueLoading ? ' · 分析中' : previewReady ? ' · 完成' : ''}
+                    {sd30sMode ? '长镜头30s预览' : '分镜预览'}{dialogueLoading ? ' · 分析中' : previewReady ? ' · 完成' : ''}
                   </span>
                   <button
-                    onClick={() => { setDialogueOpen(false); setDialogueMessages([]); setPreviewReady(false); }}
+                    onClick={() => { setSd30sMode(false); setDialogueOpen(false); setDialogueMessages([]); setPreviewReady(false); }}
                     className="text-zinc-600 hover:text-white transition-colors"
                   >
                     <X size={14} />
@@ -2057,7 +2345,7 @@ ${dialogueCtx}
                 {/* 操作按钮 */}
                 <div className="flex items-center justify-between mt-2 shrink-0">
                   <button
-                    onClick={() => { setDialogueOpen(false); setDialogueMessages([]); setPreviewReady(false); }}
+                    onClick={() => { setSd30sMode(false); setDialogueOpen(false); setDialogueMessages([]); setPreviewReady(false); }}
                     className="px-3 py-1 rounded-[8px] text-[11px] text-zinc-500 hover:text-white hover:bg-white/[0.05] transition-all"
                   >
                     放弃
@@ -2066,12 +2354,18 @@ ${dialogueCtx}
                     disabled={dialogueLoading}
                     onClick={() => {
                       if (dialogueLoading) return;
-                      const dialogueContext = dialogueMessages.map(m => `[${m.role}]: ${m.content}`).join('\n');
-                      if (!dialogueContext) {
-                        useAppStore.getState().setToastMsg('预览对话为空，请先完成分镜预览');
-                        return;
+                      if (sd30sMode) {
+                        // 长镜头30s模式：直接调用 handleSD30sConfirm
+                        handleSD30sConfirm();
+                      } else {
+                        // 通用分镜模式：原逻辑
+                        const dialogueContext = dialogueMessages.map(m => `[${m.role}]: ${m.content}`).join('\n');
+                        if (!dialogueContext) {
+                          useAppStore.getState().setToastMsg('预览对话为空，请先完成分镜预览');
+                          return;
+                        }
+                        handleFissionShots(dialogueContext);
                       }
-                      handleFissionShots(dialogueContext);
                     }}
                     className={`px-3 py-1 rounded-[8px] text-[11px] font-medium transition-all ${
                       dialogueLoading
@@ -2079,7 +2373,7 @@ ${dialogueCtx}
                         : 'bg-white/[0.1] border border-white/[0.15] text-white hover:bg-white/[0.15] cursor-pointer'
                     }`}
                   >
-                    确认并生成分镜 →
+                    {sd30sMode ? '确认并生成30s节点 →' : '确认并生成分镜 →'}
                   </button>
                 </div>
               </div>
@@ -2138,6 +2432,7 @@ ${dialogueCtx}
         onCancel={() => { setShowEpisodeSelect(false); setCachedEpisodesForModal(null); }}
       />
     )}
+
   </>
   );
 };

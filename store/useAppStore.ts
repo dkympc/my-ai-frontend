@@ -47,7 +47,7 @@ interface AppState {
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
-      canvasSettings: { defaultLLMModel: 'deepseek-v4-pro', defaultImageModel: 'gpt-image-2', defaultVideoModel: 'doubao-seedance-2-0-260128', globalPromptSuffix: '', globalAssetPromptPrefix: '', globalRatio: '16:9', directorGenre: 'default', directorTempo: '', fissionMethod: 'general' },
+      canvasSettings: { defaultLLMModel: 'deepseek-v4-flash', defaultImageModel: 'gpt-image-2', defaultVideoModel: 'doubao-seedance-2-0-260128', globalPromptSuffix: '', globalAssetPromptPrefix: '', globalRatio: '16:9', directorGenre: 'default', directorTempo: '', fissionMethod: 'general' },
       setCanvasSettings: (updater) => set((state) => ({
         canvasSettings: typeof updater === 'function' ? updater(state.canvasSettings) : updater
       })),

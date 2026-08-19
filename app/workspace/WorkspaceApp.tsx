@@ -532,7 +532,7 @@ export default function WorkspaceApp() {
         activeView: 'chat',
         isSettingsModalOpen: false,
         isFilmControlOpen: false,
-        canvasSettings: { defaultLLMModel: 'deepseek-v4-pro', defaultImageModel: 'gpt-image-2', defaultVideoModel: 'doubao-seedance-2-0-260128', globalPromptSuffix: '', globalAssetPromptPrefix: '', globalRatio: '16:9', directorGenre: 'default', directorTempo: '', fissionMethod: 'general' },
+        canvasSettings: { defaultLLMModel: 'deepseek-v4-flash', defaultImageModel: 'gpt-image-2', defaultVideoModel: 'doubao-seedance-2-0-260128', globalPromptSuffix: '', globalAssetPromptPrefix: '', globalRatio: '16:9', directorGenre: 'default', directorTempo: '', fissionMethod: 'general' },
         toastMsg: null,
         outOfBalanceMsg: null,
       });

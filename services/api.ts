@@ -7,11 +7,15 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "";
 // 定义配置项，支持传入原生 fetch 的所有参数
 interface FetchOptions extends RequestInit {
   requireAuth?: boolean; // 是否需要带上 Token，默认 true
+  useApiRoute?: boolean; // ★ 新增：为 true 时走 Next.js API Route（绕开 async rewrites 代理缓冲）
 }
 
 export async function fetchApi(endpoint: string, options: FetchOptions = {}) {
-  const { requireAuth = true, ...customConfig } = options;
+  const { requireAuth = true, useApiRoute = false, ...customConfig } = options;
   
+  // ★ 如果 useApiRoute，路径改为 /api/...（去掉 /v1 前缀，对应 Next.js API Route 路径）
+  const url = useApiRoute ? `/api${endpoint.replace(/^\/v1/, '')}` : `${API_BASE}${endpoint}`;
+
   // 1. 组装请求头
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
@@ -32,9 +36,7 @@ export async function fetchApi(endpoint: string, options: FetchOptions = {}) {
 
   try {
     // 2. 发起真实请求
-    const response = await fetch(`${API_BASE}${endpoint}`, config);
-
-    // 3. 全局拦截异常状态码 (统一海关处理)
+    const response = await fetch(url, config);
     // 🚨 401 只在已登录状态下才触发重载（排除登录接口本身的 401）
     if (response.status === 401 && requireAuth) {
       localStorage.removeItem('yr-ai-token');

@@ -42,7 +42,8 @@ interface WorkspaceProps {
   
 import { MediaNode, TextNode, RenderNode, CombineNode, MasterScriptNode, ShotNode, VideoClipNode, ScriptTableNode, AssetTableNode, PanoramaNode, GroupNode } from './CustomNodes';
 import { DirectorStageNode } from './DirectorStageNode';
-const nodeTypes = { media: MediaNode, text: TextNode, render: RenderNode, combine: CombineNode, masterScript: MasterScriptNode, shot: ShotNode, videoClip: VideoClipNode, scriptTable: ScriptTableNode, assetTable: AssetTableNode, panorama: PanoramaNode, directorStage: DirectorStageNode, group: GroupNode };
+import { SD30sNode } from './SD30sNode';
+const nodeTypes = { media: MediaNode, text: TextNode, render: RenderNode, combine: CombineNode, masterScript: MasterScriptNode, shot: ShotNode, videoClip: VideoClipNode, scriptTable: ScriptTableNode, assetTable: AssetTableNode, panorama: PanoramaNode, directorStage: DirectorStageNode, group: GroupNode, sd30s: SD30sNode };
 
 // ✨ 自定义可悬停删除的连线组件（含光流动画）
 function DeletableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, markerEnd }: any) {
@@ -969,7 +970,7 @@ function CanvasWorkspace({ imageHistory, videoHistory }: WorkspaceProps) {
                 LLM 模型 (Canvas Chat Model)
               </label>
               <DirectorSelect
-                value={canvasSettings?.defaultLLMModel || 'deepseek-v4-pro'}
+                value={canvasSettings?.defaultLLMModel || 'deepseek-v4-flash'}
                 onChange={(val) => setCanvasSettings({ ...canvasSettings, defaultLLMModel: val })}
                 options={MODELS.map(m => ({ key: m.id, label: m.name }))}
               />

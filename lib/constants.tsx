@@ -24,7 +24,7 @@ export const MODELS = [
   { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash', desc: '新一代极速响应' },
   { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash', desc: '极致响应速度' },
   { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro', desc: '复杂推理与长文本' },
-  { id: 'deepseek-v4-pro', name: 'DeepSeek V4', desc: '深度思考与逻辑' },
+  { id: 'deepseek-v4-flash', name: 'DeepSeek V4', desc: '深度思考与逻辑' },
   { id: 'kimi-k2.6', name: 'Kimi 2.6', desc: '长文本理解与推理' },
   { id: 'claude-haiku-4-5-20251001-thinking', name: 'Claude 4.5', desc: '快速推理与工具调用' },
 ];

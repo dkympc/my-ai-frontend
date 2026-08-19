@@ -383,5 +383,256 @@ export function useCanvasEngine() {
     }
   };
 
-  return { enqueueTask };
+  // ==========================================
+  // 🎭 SD2.5 30s 表演 — 三步独立任务函数
+  // ==========================================
+
+  /**
+   * 第0步-分析：定场图空间分析（只出文本，不出图）
+   * 调用 stage0 获取场景空间分析文本，用户编辑后再手动触发图片生成
+   */
+  const executeTopDownAnalysis = async (
+    scriptText: string,
+    canvasSettings: any,
+    onStart: () => void,
+    onDone: (fullText: string) => void,
+    onError: (msg: string) => void
+  ) => {
+    try {
+      onStart();
+      const response = await fetchApi('/v1/canvas/prompt', {
+        method: 'POST',
+        body: JSON.stringify({
+          prompt_type: 'sd2.5-30s-stage0-topdown',
+          params: {
+            genre: canvasSettings?.directorGenre || '',
+            tempo: canvasSettings?.directorTempo || ''
+          },
+          model: canvasSettings?.defaultLLMModel || 'deepseek-v4-flash',
+          user_content: scriptText,
+          stream: false
+        })
+      });
+      const data = await response.json();
+      const fullText = data?.choices?.[0]?.message?.content || '';
+      onDone(fullText);
+    } catch (error: any) {
+      console.error("[SD30s TopDown Analysis Error] - 原因是：", error?.message || error);
+      onError(error?.message || '空间分析失败');
+    }
+  };
+
+  /**
+   * 第0步-生图：为单个场景生成定场图（抽象拓扑 + 白模布局）
+   * 抽象拓扑（鸟瞰图）不动，俯视图改为白膜风格——用颜色人偶+角色标签区分角色
+   * 支持用户自选生图模型（gpt-image-2 / banana-pro / seedream5.0）
+   */
+  const executeTopDownImageGen = async (
+    sceneDescription: string,
+    sceneName: string,
+    onImageGenerated: (abstractUrl: string, whiteModelUrl: string) => void,
+    onError: (msg: string) => void,
+    /** 用户自选的生图参数 */
+    imageParams?: {
+      model: string;
+      quality: string;
+      ratio: string;
+      styleOverride: string;
+    }
+  ) => {
+    const params = imageParams || { model: 'gpt-image-2', quality: '1K', ratio: '16:9', styleOverride: '继承全局预设' };
+    try {
+      // ① 抽象拓扑图（鸟瞰图）—— 不动，保持原有风格
+      const abstractResp = await fetchApi('/v1/images/generations', {
+        method: 'POST',
+        body: JSON.stringify({
+          model: 'gpt-image-2',
+          prompt: `Bird's-eye view abstract topological map of scene layout: ${sceneDescription}. Minimalist style, color blocks represent character positions, arrows show movement paths, clean white background, architectural blueprint style. Scene name: ${sceneName}.`,
+          n: 1,
+          ratio: '16:9'
+        })
+      });
+      const abstractData = await abstractResp.json();
+      const abstractUrl = abstractData?.data?.[0]?.url || '';
+
+      // ② 白模布局图（替代原实景俯视图）
+      // 用白膜风格展示空间布局，不同角色用不同颜色的简化人形+标签区分
+      const whiteModelPrompt = `Top-down view white architectural model: ${sceneDescription}. Clean untextured white geometric environment, color-coded simplified human figures represent different characters (each character has a distinct color and name label), architectural visualization style, minimalist design presentation, soft ambient lighting, no textures on surfaces. Scene name: ${sceneName}.`;
+
+      // 根据用户选择的模型构建 payload
+      const payload: any = {
+        model: params.model,
+        prompt: whiteModelPrompt,
+        n: 1,
+      };
+
+      // gpt-image-2：比例前缀拼入 prompt
+      if (params.model === 'gpt-image-2') {
+        const gptPrefixMap: Record<string, string> = {
+          '1:1': 'square 1:1 format, ',
+          '16:9': 'widescreen 16:9, ',
+          '9:16': 'vertical 9:16, ',
+          '4:3': '4:3 aspect ratio, ',
+          '3:4': '3:4 vertical, ',
+        };
+        payload.prompt = (gptPrefixMap[params.ratio] || 'widescreen 16:9, ') + whiteModelPrompt;
+      }
+      // banana-pro：extraParams 传比例和分辨率
+      else if (params.model === 'banana-pro') {
+        let resolutionGrade = '1K';
+        if (params.quality.includes('2K')) resolutionGrade = '2K';
+        else if (params.quality.includes('4K')) resolutionGrade = '4K';
+        payload.aspectRatio = params.ratio;
+        payload.imageSize = resolutionGrade;
+      }
+      // seedream5.0：像素尺寸映射 + extraParams
+      else if (params.model === 'seedream5.0') {
+        const seedreamGrade = params.quality.includes('3K') ? '3K' : '2K';
+        const seedreamGrid: Record<string, Record<string, string>> = {
+          '16:9': { '2K': '2736x1538', '3K': '3456x1944' },
+          '9:16': { '2K': '1538x2736', '3K': '1944x3456' },
+          '1:1':  { '2K': '2048x2048', '3K': '3072x3072' },
+          '4:3':  { '2K': '2364x1774', '3K': '3072x2304' },
+          '3:4':  { '2K': '1774x2364', '3K': '2304x3072' },
+        };
+        payload.size = (seedreamGrid[params.ratio] || seedreamGrid['16:9'])[seedreamGrade];
+        payload.output_format = 'png';
+        payload.watermark = false;
+      }
+      // 兜底：通用 fallback
+      else {
+        const fallbackPrefixMap: Record<string, string> = {
+          '16:9': 'widescreen 16:9, ',
+          '9:16': 'vertical 9:16, ',
+          '1:1': 'square 1:1, ',
+          '4:3': '4:3, ',
+          '3:4': '3:4 vertical, ',
+        };
+        payload.prompt = (fallbackPrefixMap[params.ratio] || 'widescreen 16:9, ') + whiteModelPrompt;
+      }
+
+      // 风格覆写
+      if (params.styleOverride && params.styleOverride !== '继承全局预设') {
+        const styleMap: Record<string, string> = {
+          '🎬 电影质感': ', Cinematic lighting, 8k resolution, highly detailed',
+          '🌸 二次元': ', Anime style, studio ghibli, ultra-detailed',
+          '📷 极致写实': ', Photorealistic, RAW photo, ultra-realistic',
+          '🧊 3D 渲染': ', 3D render, Octane Render, Unreal Engine 5',
+          '🌃 赛博朋克': ', Cyberpunk style, neon lights, highly detailed',
+        };
+        payload.prompt += styleMap[params.styleOverride] || '';
+      }
+
+      const whiteModelResp = await fetchApi('/v1/images/generations', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      const whiteModelData = await whiteModelResp.json();
+      const whiteModelUrl = whiteModelData?.data?.[0]?.url || whiteModelData?.url || '';
+
+      onImageGenerated(abstractUrl, whiteModelUrl);
+    } catch (error: any) {
+      console.error("[SD30s TopDown Image Error] - 原因是：", error?.message || error);
+      onError(error?.message || '定场图生成失败');
+    }
+  };
+
+  /**
+   * 第1步：情绪剧本分析（必做）
+   * 调用 stage1，返回可编辑的情绪分析文本
+   */
+  const executeEmotionTask = async (
+    scriptText: string,
+    canvasSettings: any,
+    assetTableText: string,
+    onStart: () => void,
+    onDone: (fullText: string) => void,
+    onError: (msg: string) => void
+  ) => {
+    try {
+      onStart();
+      const userContent = assetTableText
+        ? `【剧本选段】\n${scriptText}\n\n【资产表信息】\n${assetTableText}`
+        : scriptText;
+
+      const response = await fetchApi('/v1/canvas/prompt', {
+        method: 'POST',
+        body: JSON.stringify({
+          prompt_type: 'sd2.5-30s-stage1-emotion',
+          params: {
+            genre: canvasSettings?.directorGenre || '',
+            tempo: canvasSettings?.directorTempo || ''
+          },
+          model: canvasSettings?.defaultLLMModel || 'deepseek-v4-flash',
+          user_content: userContent,
+          stream: false
+        })
+      });
+      const data = await response.json();
+      const fullText = data?.choices?.[0]?.message?.content || '';
+      onDone(fullText);
+    } catch (error: any) {
+      console.error("[SD30s Emotion Error] - 原因是：", error?.message || error);
+      onError(error?.message || '情绪分析失败');
+    }
+  };
+
+  /**
+   * 第2步：30s 表演提示词生成（必做）
+   * 调用 stage2，返回完整的表演提示词三段式文本
+   * 接收：选中文本 + 情绪分析结果 + 空间分析结果（可选）
+   */
+  const executePerformTask = async (
+    userContent: string,
+    canvasSettings: any,
+    onStart: () => void,
+    onDone: (fullText: string) => void,
+    onError: (msg: string) => void,
+    /** 空间分析文本（可选），透传给 stage2 让 LLM 知道角色站位 */
+    spatialAnalysisText?: string,
+    /** 预览对话分段方案摘要（可选），透传协商好的创作方向给 stage2 */
+    dialogueContext?: string
+  ) => {
+    try {
+      onStart();
+      // 拼接多个上下文块（所有参考信息都标注为辅助参考，不用于新增内容）
+      let finalUserContent = userContent;
+      if (spatialAnalysisText) {
+        finalUserContent += `\n\n【参考信息 — 空间布局（仅用于理解角色站位，不用于新增内容）】\n${spatialAnalysisText}`;
+      }
+      if (dialogueContext) {
+        finalUserContent += `\n\n【参考信息 — 分段方案（仅用于了解分段结构，不用于新增内容）】\n${dialogueContext.substring(0, 2000)}`;
+      }
+
+      // 构造请求体，对 deepseek 模型关闭思考 + 设 max_tokens 防截断
+      const targetModel = canvasSettings?.defaultLLMModel || 'deepseek-v4-flash';
+      const performPayload: any = {
+        prompt_type: 'sd2.5-30s-stage2-perform',
+        params: {
+          genre: canvasSettings?.directorGenre || '',
+          tempo: canvasSettings?.directorTempo || ''
+        },
+        model: targetModel,
+        user_content: finalUserContent,
+        stream: false
+      };
+      // ★ 对 deepseek 模型：关思考 + 大 max_tokens（后端也会兜底设 65536）
+      if (targetModel && targetModel.includes('deepseek')) {
+        performPayload.thinking = { type: 'disabled' };
+        performPayload.max_tokens = 65536;
+      }
+      const response = await fetchApi('/v1/canvas/prompt', {
+        method: 'POST',
+        body: JSON.stringify(performPayload)
+      });
+      const data = await response.json();
+      const fullText = data?.choices?.[0]?.message?.content || '';
+      onDone(fullText);
+    } catch (error: any) {
+      console.error("[SD30s Perform Error] - 原因是：", error?.message || error);
+      onError(error?.message || '表演提示词生成失败');
+    }
+  };
+
+  return { enqueueTask, executeTopDownAnalysis, executeTopDownImageGen, executeEmotionTask, executePerformTask };
 }
